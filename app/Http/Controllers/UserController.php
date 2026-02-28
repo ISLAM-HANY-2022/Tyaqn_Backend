@@ -3,7 +3,6 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use App\Models\User;
 use Illuminate\Support\Facades\Validator;
 use App\Traits\UploadImageTrait;
 use App\Traits\ApiResponseTrait;
@@ -44,5 +43,22 @@ class UserController extends Controller
             $user->save();
 
             return $this->successResponse($user, 'Profile updated successfully');
+        }
+
+        public function deleteAccount(Request $request) {
+            // 1. الحصول على المستخدم الحالي عبر التوكن
+            $user = $request->user();
+        
+            if ($user) {
+                // 2. مسح جميع التوكنات الخاصة به لمنع أي دخول مستقبلي بالتوكن القديم
+                $user->tokens()->delete();
+        
+                // 3. حذف المستخدم نهائياً من جدول users
+                $user->delete();
+        
+                return $this->successResponse(null, 'Account Deleted successfully');
+            }
+        
+            return $this->errorResponse(null, 'this account doesn`t exist');
         }
 }

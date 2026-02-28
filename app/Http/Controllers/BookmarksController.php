@@ -6,7 +6,7 @@ use Illuminate\Http\Request;
 use App\Traits\ApiResponseTrait;
 use App\Models\Article;
 
-class BookmarkController extends Controller
+class BookmarksController extends Controller
 {
     use ApiResponseTrait;
 
