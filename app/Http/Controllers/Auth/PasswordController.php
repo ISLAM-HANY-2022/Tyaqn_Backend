@@ -24,11 +24,15 @@ class PasswordController extends Controller
         ]);
     
         if ($validator->fails()) {
-            // نأخذ أول رسالة خطأ (مثلاً: الإيميل غير موجود)
             return $this->errorResponse($validator->errors()->first(), null, 422);
         }
-
-        // توليد الكود وتخزينه
+    
+        //تحقق لو اليوزر طلب كود في أقل من دقيقة
+        $existingRecord = DB::table('password_reset_tokens')->where('email', $request->email)->first();
+        if ($existingRecord && now()->subMinute()->lt($existingRecord->created_at)) {
+            return $this->errorResponse('Please wait a minute before requesting another code.', null, 429);
+        }
+    
         $code = rand(1000, 9999);
         
         DB::table('password_reset_tokens')->updateOrInsert(
@@ -38,13 +42,10 @@ class PasswordController extends Controller
                 'created_at' => now()
             ]
         );
-
-        // إرسال الإيميل
+    
         Mail::to($request->email)->send(new ResetPasswordMail($code));
-
-        return $this->successResponse([
-            'email' => $request->email 
-        ], 'OTP sent successfully');
+    
+        return $this->successResponse(['email' => $request->email], 'OTP sent successfully');
     }
 
     // 2. التحقق من الكود
@@ -82,7 +83,7 @@ class PasswordController extends Controller
                 'min:8',
                 'confirmed', // هذا هو المسؤول عن حقل التأكيد
                 'regex:/[A-Z]/',      // يجب وجود حرف كبير (كما في الصورة)
-                'regex:/[0-9]',// يجب وجود رقم (كما في الصورة)
+                'regex:/[0-9]/',// يجب وجود رقم (كما في الصورة)
                 /*'regex:/[@$!%*#?&]/', // يجب وجود رمز خاص (كما في الصورة)*/
             ],
         ]);
