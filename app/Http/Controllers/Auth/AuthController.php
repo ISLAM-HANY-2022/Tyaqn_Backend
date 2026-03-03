@@ -51,17 +51,13 @@ class AuthController extends Controller
             );
 
             // 4. محاولة إرسال الإيميل (لو الإيميل وهمي العملية هتفشل هنا)
-            Mail::to('islamhany.cv@gmail.com')->send(new \App\Mail\ResetPasswordMail($code)); 
-
-            // 5. إنشاء التوكن (بما إننا في خطوة واحدة)
-            $token = $user->createToken('mobile-token')->plainTextToken;
+            Mail::to('islamhany.cv@gmail.com')->send(new \App\Mail\ResetPasswordMail($code));             
 
             // لو كل شيء تمام، ثبت البيانات في الداتابيز
             DB::commit();
 
             return $this->successResponse([
-                'user'  => $user,
-                'token' => $token
+                'user'  => $user,               
             ], 'Registered successfully. OTP sent to verify your email.', 201);
 
         } catch (\Exception $e) {
@@ -77,26 +73,34 @@ class AuthController extends Controller
             'email' => 'required|email|exists:users,email',
             'code'  => 'required|numeric'
         ]);
-
+    
         if ($validator->fails()) {
             return $this->errorResponse($validator->errors()->first(), null, 422);
         }
-
+    
         $record = DB::table('password_reset_tokens')->where('email', $request->email)->first();
-
-        // التأكد من صحة الكود وصلاحيته (مثلاً 15 دقيقة)
+    
+        // 1. التأكد من صحة الكود وصلاحيته
         if (!$record || !Hash::check($request->code, $record->token)) {
             return $this->errorResponse('The verification code is incorrect', null, 422);
         }
-
-        // تفعيل حساب المستخدم في جدول الـ users
+    
+        // 2. تفعيل حساب المستخدم
         $user = User::where('email', $request->email)->first();
         $user->update(['email_verified_at' => now()]);
-
-        // مسح الكود من الجدول عشان ميتستخدمش تاني
+    
+        // 3. مسح الكود من الجدول عشان ميتستخدمش تاني
         DB::table('password_reset_tokens')->where('email', $request->email)->delete();
-
-        return $this->successResponse(null, 'The account has been successfully activated');
+    
+        // --- الإضافة الجديدة هنا ---
+        // 4. توليد التوكن الآن فقط لأن الحساب أصبح موثوقاً
+        $token = $user->createToken('mobile-token')->plainTextToken;
+        // -------------------------
+    
+        return $this->successResponse([
+            'user'  => $user,
+            'token' => $token // بنبعت التوكن هنا عشان الموبايل يخزنه ويبدأ يستخدمه
+        ], 'The account has been successfully activated and logged in');
     }
 
     public function resendRegistrationOtp(Request $request)
