@@ -154,12 +154,10 @@ class AuthController extends Controller
         if (! $user || ! Hash::check($request->password, $user->password)) {
             return $this->errorResponse('The email or password is incorrect', null, 401);
         }
-
-        // --- الإضافة الجديدة هنا ---
+        
         if ($user->email_verified_at == null) {
             return $this->errorResponse('Your account is not verified. Please verify your email first.', null, 403);
-        }
-        // -------------------------
+        }       
 
         $user->tokens()->delete();
         $token = $user->createToken('mobile-token')->plainTextToken;
