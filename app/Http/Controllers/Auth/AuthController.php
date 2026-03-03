@@ -71,9 +71,71 @@ class AuthController extends Controller
         }
     }
 
+    public function verifyEmailOtp(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email|exists:users,email',
+            'code'  => 'required|numeric'
+        ]);
+
+        if ($validator->fails()) {
+            return $this->errorResponse($validator->errors()->first(), null, 422);
+        }
+
+        $record = DB::table('password_reset_tokens')->where('email', $request->email)->first();
+
+        // التأكد من صحة الكود وصلاحيته (مثلاً 15 دقيقة)
+        if (!$record || !Hash::check($request->code, $record->token)) {
+            return $this->errorResponse('The verification code is incorrect', null, 422);
+        }
+
+        // تفعيل حساب المستخدم في جدول الـ users
+        $user = User::where('email', $request->email)->first();
+        $user->update(['email_verified_at' => now()]);
+
+        // مسح الكود من الجدول عشان ميتستخدمش تاني
+        DB::table('password_reset_tokens')->where('email', $request->email)->delete();
+
+        return $this->successResponse(null, 'The account has been successfully activated');
+    }
+
+    public function resendRegistrationOtp(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email|exists:users,email'
+        ]);
+    
+        if ($validator->fails()) {
+            return $this->errorResponse($validator->errors()->first(), null, 422);
+        }
+    
+        // الشرط اللي طلبته: منع الإرسال قبل مرور دقيقة
+        $existingRecord = DB::table('password_reset_tokens')->where('email', $request->email)->first();
+        
+        if ($existingRecord && now()->subMinute()->lt($existingRecord->created_at)) {
+            $remainingSeconds = 60 - now()->diffInSeconds($existingRecord->created_at);
+            return $this->errorResponse("Please wait $remainingSeconds A second before requesting a new code", null, 429);
+        }
+    
+        // توليد كود جديد
+        $code = rand(1000, 9999);
+        
+        DB::table('password_reset_tokens')->updateOrInsert(
+            ['email' => $request->email],
+            [
+                'token' => Hash::make($code),
+                'created_at' => now()
+            ]
+        );
+    
+        // الإرسال لإيميلك (حسب الاتفاق للتجربة)
+        Mail::to('islamhany.cv@gmail.com')->send(new \App\Mail\ResetPasswordMail($code));
+    
+        return $this->successResponse(null, 'تم إعادة إرسال الكود بنجاح');
+    }
+
     public function login(Request $request)
     {
-        // تم التعديل هنا لاستخدام الـ Validator يدوياً لتوحيد الرد
         $validator = Validator::make($request->all(), [
             'email'    => 'required|email',
             'password' => 'required|string',
@@ -85,10 +147,16 @@ class AuthController extends Controller
 
         $user = User::where('email', $request->email)->first();
 
-        // هنا نستخدم نفس التكنيك في رسالة الخطأ
         if (! $user || ! Hash::check($request->password, $user->password)) {
             return $this->errorResponse('The email or password is incorrect', null, 401);
         }
+
+        // --- الإضافة الجديدة هنا ---
+        if ($user->email_verified_at == null) {
+            return $this->errorResponse('Your account is not verified. Please verify your email first.', null, 403);
+        }
+        // -------------------------
+
         $user->tokens()->delete();
         $token = $user->createToken('mobile-token')->plainTextToken;
 

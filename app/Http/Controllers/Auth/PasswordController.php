@@ -30,7 +30,8 @@ class PasswordController extends Controller
         //تحقق لو اليوزر طلب كود في أقل من دقيقة
         $existingRecord = DB::table('password_reset_tokens')->where('email', $request->email)->first();
         if ($existingRecord && now()->subMinute()->lt($existingRecord->created_at)) {
-            return $this->errorResponse('Please wait a minute before requesting another code.', null, 429);
+            $remainingSeconds = 60 - now()->diffInSeconds($existingRecord->created_at);
+            return $this->errorResponse("Please wait $remainingSeconds A second before requesting a new code", null, 429);
         }
     
         $code = rand(1000, 9999);

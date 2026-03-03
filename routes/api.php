@@ -12,6 +12,8 @@ use App\Http\Controllers\BookmarksController;
 
 /*===================  AUTH (Public)  =====================*/
 Route::post('/register', [AuthController::class, 'register']);//✅
+Route::post('/register/verify', [AuthController::class, 'verifyEmailOtp']);
+Route::post('/register/resendOtp', [AuthController::class, 'resendRegistrationOtp']);
 Route::post('/login', [AuthController::class, 'login']);//✅
 
 // عمليات استعادة كلمة المرور
