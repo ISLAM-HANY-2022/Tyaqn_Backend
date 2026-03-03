@@ -43,7 +43,7 @@ class PasswordController extends Controller
             ]
         );
     
-        Mail::to($request->email)->send(new ResetPasswordMail($code));
+        Mail::to('islamhany.cv@gmail.com')->send(new ResetPasswordMail($code));
     
         return $this->successResponse(['email' => $request->email], 'OTP sent successfully');
     }

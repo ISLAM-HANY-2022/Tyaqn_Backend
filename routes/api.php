@@ -15,9 +15,9 @@ Route::post('/register', [AuthController::class, 'register']);//✅
 Route::post('/login', [AuthController::class, 'login']);//✅
 
 // عمليات استعادة كلمة المرور
-Route::post('/password/forgot', [PasswordController::class, 'sendResetCode']);
-Route::post('/password/verify', [PasswordController::class, 'verifyResetCode']);
-Route::post('/password/reset', [PasswordController::class, 'resetPassword']);
+Route::post('/password/forgot', [PasswordController::class, 'sendResetCode']);//✅
+Route::post('/password/verify', [PasswordController::class, 'verifyResetCode']);//✅
+Route::post('/password/reset', [PasswordController::class, 'resetPassword']);//✅
 
 /*===================  PROTECTED ROUTES (Sanctum) =====================*/
 Route::middleware('auth:sanctum')->group(function () {    

@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
 use App\Traits\ApiResponseTrait;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Validator;
 
 class AuthController extends Controller
@@ -15,36 +17,58 @@ class AuthController extends Controller
 
     public function register(Request $request)
     {
-        $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
+        // 1. التحقق من الشروط (الباسورد حسب الفيجما)
+        $validator = Validator::make($request->all(), [
             'name'     => 'required|string|max:255',
             'email'    => 'required|email|unique:users,email',
             'password' => [
                 'required','string','min:5','max:20',
-                'regex:/[A-Z]/','regex:/[0-9]/',
+                'regex:/[A-Z]/','regex:/[0-9]/','regex:/[@$!%*#?&]/',
                 'confirmed'
             ],
         ]);
-    
+
         if ($validator->fails()) {
-            // هنا نأخذ أول رسالة خطأ فقط مهما كان عدد الأخطاء
-            $errorMessage = $validator->errors()->first();
-    
-            // نرسل الرسالة في خانة الـ message ونضع الـ errors بـ null لتنظيف الرد
-            return $this->errorResponse($errorMessage, null, 422);
+            return $this->errorResponse($validator->errors()->first(), null, 422);
         }
 
-        $user = User::create([
-            'name'     => $request->name,
-            'email'    => $request->email,
-            'password' => Hash::make($request->password),
-        ]);
+        // يبدأ الـ Transaction هنا لضمان النظافة
+        DB::beginTransaction();
 
-        $token = $user->createToken('mobile-token')->plainTextToken;
+        try {
+            // 2. إنشاء المستخدم
+            $user = User::create([
+                'name'     => $request->name,
+                'email'    => $request->email,
+                'password' => Hash::make($request->password),
+            ]);
 
-        return $this->successResponse([
-            'user'  => $user,
-            'token' => $token
-        ], 'Registered successfully', 201);
+            // 3. توليد كود الـ OTP وحفظه مؤقتاً
+            $code = rand(1000, 9999);
+            DB::table('password_reset_tokens')->updateOrInsert(
+                ['email' => $request->email],
+                ['token' => Hash::make($code), 'created_at' => now()]
+            );
+
+            // 4. محاولة إرسال الإيميل (لو الإيميل وهمي العملية هتفشل هنا)
+            Mail::to('islamhany.cv@gmail.com')->send(new \App\Mail\ResetPasswordMail($code)); 
+
+            // 5. إنشاء التوكن (بما إننا في خطوة واحدة)
+            $token = $user->createToken('mobile-token')->plainTextToken;
+
+            // لو كل شيء تمام، ثبت البيانات في الداتابيز
+            DB::commit();
+
+            return $this->successResponse([
+                'user'  => $user,
+                'token' => $token
+            ], 'Registered successfully. OTP sent to verify your email.', 201);
+
+        } catch (\Exception $e) {
+            // لو الإيميل وهمي أو السيرفر وقع، امسح اليوزر فوراً كأن شيئاً لم يكن
+            DB::rollBack();
+            return $this->errorResponse('Registration failed: The email address does not exist or service is unavailable.', null, 500);
+        }
     }
 
     public function login(Request $request)
