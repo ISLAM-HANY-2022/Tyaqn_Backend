@@ -13,6 +13,8 @@ class Kernel extends ConsoleKernel
     protected function schedule(Schedule $schedule): void
     {
         // $schedule->command('inspire')->hourly();
+        // تنظيف الحسابات غير المفعلة كل ساعة
+         $schedule->command('users:cleanup-pending')->hourly();
     }
 
     /**
