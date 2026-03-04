@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
-Route::get('/', function () {
-    return view('welcome');
+Route::get('/php-info', function (Request $request) {
+    
+    if ($request->query('pass') !== '123456') {
+        return abort(403, 'غير مسموح لك بالدخول');
+    }
+    return phpinfo();
 });
