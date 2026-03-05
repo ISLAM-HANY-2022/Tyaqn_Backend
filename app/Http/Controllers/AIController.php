@@ -7,6 +7,7 @@ use App\Models\Verification;
 use Illuminate\Support\Facades\Http;
 use App\Traits\UploadImageTrait;
 use App\Traits\ApiResponseTrait;
+use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 
 class AIController extends Controller
 {
@@ -61,63 +62,62 @@ class AIController extends Controller
     public function verifyMedia(Request $request)
     {
         $request->validate([
-            'media_file' => 'required|file|mimes:jpg,jpeg,png,mp4|max:102400', // حد أقصى 100 ميجا
+            'media_file' => 'required|file|mimes:jpg,jpeg,png,mp4|max:102400', 
             'type'       => 'required|in:image,video',
             'title'      => 'nullable|string'
         ]);
-
-        // عمل Hash للملف للتأكد من بصمته قبل الرفع
+    
+        // 1. عمل Hash للملف من الـ Path المؤقت (مهم جداً للتحقق من التكرار)
         $incomingHash = md5_file($request->file('media_file')->getRealPath());
-
-        // التحقق من وجود فحص سابق لنفس الملف
+    
+        // 2. التحقق من وجود فحص سابق لنفس الملف في الداتا بيز
         $existing = Verification::where('file_hash', $incomingHash)->first();
         if ($existing) {
             return $this->successResponse($existing, 'هذا الملف تم فحصه مسبقاً، إليك النتيجة المسجلة لدينا.');
         }
-
-        // رفع الملف إلى مجلد public/uploads/media باستخدام الـ Trait
-        $uploadData = $this->uploadFile($request->file('media_file'), 'media');
-        $filePath = $uploadData['path'];
-        $fileHash = $uploadData['hash'];
-        $fullPath = public_path($filePath);
-
-        try {           
+    
+        try {
+            // 3. الرفع إلى Cloudinary بدلاً من الـ Trait القديم
+            // سيتم تخزين الملف في مجلد اسمه Tyaqn على السحابة
+            $upload = Cloudinary::upload($request->file('media_file')->getRealPath(), [
+                'folder' => 'Tyaqn/media'
+            ]);
             
+            $uploadedFileUrl = $upload->getSecurePath(); // هذا هو الرابط الذي يبدأ بـ https
+    
+            // 4. إعداد الاتصال بموديل الـ AI
             $baseUrl = config('services.ai_model.url');
-
-            // إرسال الملف الفعلي لموديل الـ AI
+    
+            // نرسل محتوى الملف للـ AI (باستخدام الرابط السحابي لضمان الوصول)
             $response = Http::attach(
                 'media_file', 
-                file_get_contents($fullPath), 
+                file_get_contents($uploadedFileUrl), 
                 $request->file('media_file')->getClientOriginalName()
             )->post($baseUrl . '/predict-media', [
                 'type' => $request->type
             ]);
-
+    
             if ($response->successful()) {
                 $aiResult = $response->json();
-
-                // تخزين بيانات الفحص في قاعدة البيانات
+    
+                // 5. تخزين البيانات في قاعدة البيانات
                 $verification = Verification::create([
                     'user_id'            => auth()->id(),
-                    'file_hash'          => $fileHash,
+                    'file_hash'          => $incomingHash,
                     'title'              => $request->title ?? 'فحص ميديا جديد',
-                    'input_data'         => $filePath,
+                    'input_data'         => $uploadedFileUrl, // هنا نخزن رابط السحابة بدلاً من Path المجلد المحلي
                     'type'               => $request->type,
-                    'result_status'      => $aiResult['status'],
-                    'description_result' => $aiResult['explanation'],
+                    'result_status'      => $aiResult['status'] ?? 'unknown',
+                    'description_result' => $aiResult['explanation'] ?? 'No explanation provided',
                 ]);
-
-                return $this->successResponse($verification, 'تم فحص الملف وتخزينه بنجاح');
+    
+                return $this->successResponse($verification, 'تم فحص الملف وتخزينه على السحابة بنجاح');
             }
-
-            if (file_exists($fullPath)) { unlink($fullPath); }
+    
             return $this->errorResponse('فشل موديل الميديا في تحليل الملف', 500);
-
+    
         } catch (\Exception $e) {
-           
-            if (file_exists($fullPath)) { unlink($fullPath); }
-            return $this->errorResponse('خطأ في الاتصال: ' . $e->getMessage(), 500);
+            return $this->errorResponse('خطأ في الاتصال أو الرفع: ' . $e->getMessage(), 500);
         }
     }
 
