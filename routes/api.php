@@ -27,7 +27,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout']);//✅    
 
     /*--- AI Verification ---*/
-    Route::post('/verify/text', [AIController::class, 'verifyText']);
+    Route::post('/verify/text', [AIController::class, 'verifyText']);//✅
     Route::post('/verify/media', [AIController::class, 'verifyMedia']);//✅
     Route::get('/history', [AIController::class, 'history']);//✅
 
