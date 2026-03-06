@@ -11,10 +11,11 @@ class Kernel extends ConsoleKernel
      * Define the application's command schedule.
      */
     protected function schedule(Schedule $schedule): void
-    {
-        // $schedule->command('inspire')->hourly();
+    {        
         // تنظيف الحسابات غير المفعلة كل ساعة
-         $schedule->command('users:cleanup-pending')->hourly();
+         $schedule->command('users:cleanup-pending')->daily();
+
+         $schedule->command('auth:clear-resets')->hourly();       
     }
 
     /**

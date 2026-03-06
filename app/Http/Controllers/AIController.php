@@ -36,23 +36,23 @@ class AIController extends Controller
             if ($response->successful()) {
                 $aiResult = $response->json();
             } else {
-                return $this->errorResponse('فشل الاتصال بموديل النصوص أو الموديل غير متاح حالياً', 500);
+                return $this->errorResponse('Failed to connect to the text model or the model is currently unavailable', 500);
             }
         } catch (\Exception $e) {
-            return $this->errorResponse('خطأ في الاتصال بالسيرفر: ' . $e->getMessage(), 500);
+            return $this->errorResponse('Failed to connect to server: ' . $e->getMessage(), 500);
         }
 
         // حفظ العملية في قاعدة البيانات بعد نجاح رد الـ AI
         $verification = Verification::create([
             'user_id'            => auth()->id(),
-            'title'              => $request->title ?? 'فحص نص جديد',
+            'title'              => $request->title ?? 'Check new text',
             'input_data'         => $request->text_input,
             'type'               => 'text',
             'result_status'      => $aiResult['status'],
             'description_result' => $aiResult['explanation'], 
         ]);
 
-        return $this->successResponse($verification, 'تم فحص النص بنجاح وتخزين النتيجة');
+        return $this->successResponse($verification, 'The text was successfully checked and the result stored');
     }
 
     /**
@@ -73,7 +73,7 @@ class AIController extends Controller
         // 2. التحقق من وجود فحص سابق لنفس الملف في الداتا بيز
         $existing = Verification::where('file_hash', $incomingHash)->first();
         if ($existing) {
-            return $this->successResponse($existing, 'هذا الملف تم فحصه مسبقاً، إليك النتيجة المسجلة لدينا.');
+            return $this->successResponse($existing, 'This file has been previously checked, here is the result recorded with us.');
         }
     
         try {
@@ -106,20 +106,20 @@ class AIController extends Controller
                 $verification = Verification::create([
                     'user_id'            => auth()->id(),
                     'file_hash'          => $incomingHash,
-                    'title'              => $request->title ?? 'فحص ميديا جديد',
+                    'title'              => $request->title ?? 'New media check',
                     'input_data'         => $uploadedFileUrl, // هنا نخزن رابط السحابة بدلاً من Path المجلد المحلي
                     'type'               => $request->type,
                     'result_status'      => $aiResult['status'] ?? 'unknown',
                     'description_result' => $aiResult['explanation'] ?? 'No explanation provided',
                 ]);
     
-                return $this->successResponse($verification, 'تم فحص الملف وتخزينه على السحابة بنجاح');
+                return $this->successResponse($verification, 'The file has been scanned and successfully stored on the cloud');
             }
     
-            return $this->errorResponse('فشل موديل الميديا في تحليل الملف', 500);
+            return $this->errorResponse('The media model failed to analyze the file', 500);
     
         } catch (\Exception $e) {
-            return $this->errorResponse('خطأ في الاتصال أو الرفع: ' . $e->getMessage(), 500);
+            return $this->errorResponse('Connection or upload error: ' . $e->getMessage(), 500);
         }
     }
 
@@ -129,6 +129,6 @@ class AIController extends Controller
     public function history()
     {    
         $history = Verification::where('user_id', auth()->id())->latest()->get();
-        return $this->successResponse($history, 'تم جلب سجل الفحوصات بنجاح');
+        return $this->successResponse($history, 'The test record was successfully retrieved');
     }
 }

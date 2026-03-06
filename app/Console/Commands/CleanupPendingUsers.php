@@ -10,7 +10,7 @@ class CleanupPendingUsers extends Command
 {
     // الاسم اللي بننادي بيه الأمر
     protected $signature = 'users:cleanup-pending';
-    protected $description = 'مسح الحسابات التي لم يتم تفعيلها خلال 24 ساعة';
+    protected $description = 'Delete accounts that were not activated within 24 hours';
 
     public function handle()
     {
@@ -20,6 +20,6 @@ class CleanupPendingUsers extends Command
             ->where('created_at', '<', Carbon::now()->subDay())
             ->delete();
 
-        $this->info("تم مسح $deletedCount حساب غير مفعل بنجاح.");
+        $this->info("Inactive accounts have been deleted successfully: $deletedCount");
     }
 }
