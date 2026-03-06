@@ -89,7 +89,8 @@ class AIController extends Controller
             $baseUrl = config('services.ai_model.url');
     
             // نرسل محتوى الملف للـ AI (باستخدام الرابط السحابي لضمان الوصول)
-            $response = Http::attach(
+            $response = Http::timeout(120) // بنقوله استنى لحد دقيقتين كاملين
+            ->attach(
                 'media_file', 
                 file_get_contents($uploadedFileUrl), 
                 $request->file('media_file')->getClientOriginalName()
