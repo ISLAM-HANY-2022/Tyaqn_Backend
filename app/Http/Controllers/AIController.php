@@ -80,9 +80,10 @@ class AIController extends Controller
             $cloudinaryUrl = env('CLOUDINARY_URL');
 
             // الرفع والحصول على النتيجة
-            $upload = Cloudinary::upload($request->file('media_file')->getRealPath(), [
-                'folder' => 'Tyaqn/media',
-            ]);
+            $upload = Cloudinary::upload(
+                $request->file('media_file')->getRealPath(),
+                ['folder' => 'Tyaqn/media']
+            );
         
             // هنا السطر السحري: استخراج الرابط من نتيجة الرفع
             $uploadedFileUrl = $upload->getSecurePath(); 
@@ -91,8 +92,8 @@ class AIController extends Controller
         
             // إرسال الرابط لموديل الـ AI
             $response = Http::timeout(120)->attach(
-                'media_file', 
-                file_get_contents($uploadedFileUrl), // دلوقتي المتغير بقى له قيمة
+                'media_file',
+                file_get_contents($request->file('media_file')->getRealPath()),
                 $request->file('media_file')->getClientOriginalName()
             )->post($baseUrl . '/predict-media', [
                 'type' => $request->type
