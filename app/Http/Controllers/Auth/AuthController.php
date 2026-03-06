@@ -91,7 +91,8 @@ class AuthController extends Controller
     
         // 3. مسح الكود من الجدول عشان ميتستخدمش تاني
         DB::table('password_reset_tokens')->where('email', $request->email)->delete();
-    
+       
+        $user->tokens()->delete();
         // --- الإضافة الجديدة هنا ---
         // 4. توليد التوكن الآن فقط لأن الحساب أصبح موثوقاً
         $token = $user->createToken('mobile-token')->plainTextToken;
