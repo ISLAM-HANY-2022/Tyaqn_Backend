@@ -17,7 +17,7 @@ class UserController extends Controller
     }
     
     public function updateProfile(Request $request){
-        
+
             $user = $request->user();
 
             $validator = Validator::make($request->all(), [
@@ -44,7 +44,7 @@ class UserController extends Controller
 
                 // 2. رفع الصورة الجديدة للمجلد المطلوب
                 // المجلد هيكون: Tyaqn/Profiles Images
-                $imageUrl = $this->uploadToCloudinary($request->file('profile_image'), 'Profiles Images');
+                $imageUrl = $this->uploadToCloudinary($request->file('profile_image'), 'Profiles_Images');
 
                 // 3. حفظ الرابط الجديد في قاعدة البيانات
                 $user->profile_image = $imageUrl;

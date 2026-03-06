@@ -25,21 +25,34 @@ trait UploadImageTrait
     public function deleteFromCloudinary($imageUrl)
     {
         if (!$imageUrl) return;
-
-        // استخراج الـ Public ID من الرابط
-        // الرابط بيكون شكله: https://res.cloudinary.com/demo/image/upload/v1234/Tyaqn/Profiles/xyz.jpg
-        // إحنا محتاجين: Tyaqn/Profiles/xyz
-        $path = parse_url($imageUrl, PHP_URL_PATH);
-        $segments = explode('/', $path);
-        
-        // الحصول على الجزء بعد 'upload/' وتجاهل الـ version (v1234)
-        $publicIdWithExtension = implode('/', array_slice($segments, 5)); 
-        
-        // إزالة الامتداد (مثل .jpg)
-        $publicId = pathinfo($publicIdWithExtension, PATHINFO_FILENAME);
-        
-        // دالة الحذف من المكتبة (بنضيف اسم المجلد قبل الـ ID لو مش موجود فيه)
-        // لكن بما إننا خزناه بالمجلد، الـ Public ID المستخرج هيحتوي عليه.
-        Cloudinary::destroy($publicId);
+    
+        try {
+            // 1. استخراج ما بعد /upload/
+            $pathAfterUpload = explode('/upload/', $imageUrl)[1] ?? null;
+            if (!$pathAfterUpload) return;
+    
+            $segments = explode('/', $pathAfterUpload);
+    
+            // 2. إزالة الجزء الخاص بالنسخة (v123456)
+            if (isset($segments[0]) && preg_match('/v\d+/', $segments[0])) {
+                array_shift($segments);
+            }
+    
+            // 3. إعادة دمج المسار (المجلدات + اسم الملف)
+            $fullPathWithExtension = implode('/', $segments);
+    
+            // 4. فك تشفير الرموز (%20 للمسافات)
+            $decodedPath = urldecode($fullPathWithExtension);
+    
+            // 5. إزالة الامتداد فقط مع الحفاظ على مسار المجلدات كامل
+            // بنشيل آخر 4 أو 5 حروف اللي هما (.jpg أو .png)
+            $publicId = preg_replace('/\.[^.]+$/', '', $decodedPath);
+    
+            // 6. الحذف من كلاودناري
+            Cloudinary::destroy($publicId);
+    
+        } catch (\Exception $e) {
+            \Log::error("Cloudinary Delete Error: " . $e->getMessage());
+        }
     }
 }
