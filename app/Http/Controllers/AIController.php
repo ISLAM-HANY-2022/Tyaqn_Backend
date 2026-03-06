@@ -77,13 +77,15 @@ class AIController extends Controller
         }
     
         try {
+
+            $cloudinaryUrl = env('CLOUDINARY_URL');
             // 3. الرفع إلى Cloudinary بدلاً من الـ Trait القديم
             // سيتم تخزين الملف في مجلد اسمه Tyaqn على السحابة
             $upload = Cloudinary::upload($request->file('media_file')->getRealPath(), [
-                'folder' => 'Tyaqn/media'
+                'folder' => 'Tyaqn/media',
+                'url'    => $cloudinaryUrl // إجبار المكتبة على استخدام الرابط من الـ ENV مباشرة
             ]);
-            
-            $uploadedFileUrl = $upload->getSecurePath(); // هذا هو الرابط الذي يبدأ بـ https
+                       
     
             // 4. إعداد الاتصال بموديل الـ AI
             $baseUrl = config('services.ai_model.url');
