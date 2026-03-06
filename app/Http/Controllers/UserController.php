@@ -17,27 +17,37 @@ class UserController extends Controller
     }
     
     public function updateProfile(Request $request){
-
+        
             $user = $request->user();
 
             $validator = Validator::make($request->all(), [
-                'name' => 'sometimes|string|max:255',
-                'email' => 'sometimes|email|unique:users,email,' . $user->id,
-                'bio' => 'sometimes|nullable|string',
+                'name'          => 'sometimes|string|max:255',
+                'email'         => 'sometimes|email|unique:users,email,' . $user->id,
+                'bio'           => 'sometimes|nullable|string',
                 'profile_image' => 'sometimes|nullable|image|mimes:jpg,jpeg,png|max:2048',
             ]);
 
             if ($validator->fails()) {
-                return $this->errorResponse($validator->errors()->first(), null, 422);
+                return $this->errorResponse($validator->errors()->first(), 422);
             }
 
             // تحديث البيانات النصية
-            $user->fill($request->only(['name','email','bio']));
+            $user->fill($request->only(['name', 'email', 'bio']));
 
-            // منطق رفع الصورة (إذا استخدمت التريت الذي اقترحته لك سابقاً)
+            // منطق رفع الصورة الجديد
             if ($request->hasFile('profile_image')) {
-                // نستخدم دالة الرفع من التريت
-                $user->profile_image = $this->uploadFile($request->file('profile_image'), 'profiles');
+                
+                // 1. إذا كان للمستخدم صورة قديمة، نقوم بحذفها من كلاودناري
+                if ($user->profile_image) {
+                    $this->deleteFromCloudinary($user->profile_image);
+                }
+
+                // 2. رفع الصورة الجديدة للمجلد المطلوب
+                // المجلد هيكون: Tyaqn/Profiles Images
+                $imageUrl = $this->uploadToCloudinary($request->file('profile_image'), 'Profiles Images');
+
+                // 3. حفظ الرابط الجديد في قاعدة البيانات
+                $user->profile_image = $imageUrl;
             }
 
             $user->save();
