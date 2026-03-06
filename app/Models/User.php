@@ -20,6 +20,7 @@ class User extends Authenticatable
     protected $fillable = [
         'name',
         'email',
+        'email_verified_at',
         'password',
         'profile_image', // أضفنا هذا العمود بناءً على الهيكلة 
         'job_title',     // أضفنا هذا العمود 
