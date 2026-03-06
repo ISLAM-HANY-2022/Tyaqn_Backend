@@ -77,24 +77,22 @@ class AIController extends Controller
         }
     
         try {
-
             $cloudinaryUrl = env('CLOUDINARY_URL');
-            // 3. الرفع إلى Cloudinary بدلاً من الـ Trait القديم
-            // سيتم تخزين الملف في مجلد اسمه Tyaqn على السحابة
+
+            // الرفع والحصول على النتيجة
             $upload = Cloudinary::upload($request->file('media_file')->getRealPath(), [
                 'folder' => 'Tyaqn/media',
-                'url'    => $cloudinaryUrl // إجبار المكتبة على استخدام الرابط من الـ ENV مباشرة
             ]);
-                       
-    
-            // 4. إعداد الاتصال بموديل الـ AI
+        
+            // هنا السطر السحري: استخراج الرابط من نتيجة الرفع
+            $uploadedFileUrl = $upload->getSecurePath(); 
+        
             $baseUrl = config('services.ai_model.url');
-    
-            // نرسل محتوى الملف للـ AI (باستخدام الرابط السحابي لضمان الوصول)
-            $response = Http::timeout(120) // بنقوله استنى لحد دقيقتين كاملين
-            ->attach(
+        
+            // إرسال الرابط لموديل الـ AI
+            $response = Http::timeout(120)->attach(
                 'media_file', 
-                file_get_contents($uploadedFileUrl), 
+                file_get_contents($uploadedFileUrl), // دلوقتي المتغير بقى له قيمة
                 $request->file('media_file')->getClientOriginalName()
             )->post($baseUrl . '/predict-media', [
                 'type' => $request->type
