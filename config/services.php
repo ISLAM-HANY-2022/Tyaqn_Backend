@@ -33,6 +33,7 @@ return [
 
     'ai_model' => [                  
         'url' => env('AI_MODEL_URL', 'http://127.0.0.1:5000'/*دا بديل لو AI_MODEL_URL مشتغلش او فيه مشكلة*/),
+        'audio_url' => env('AUDIO_AI_URL'),
     ],
 
 ];

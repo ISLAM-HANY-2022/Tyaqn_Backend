@@ -124,6 +124,74 @@ class AIController extends Controller
     }
 
     /**
+     * دالة فحص الأصوات (Deepfake Audio Detection)
+     */
+    public function verifyAudio(Request $request)
+    {
+        $request->validate([
+            'audio_file' => 'required|file|mimes:mp3,wav,aac,m4a,flac|max:20480', // حد أقصى 20 ميجا للصوت
+            'title'      => 'nullable|string'
+        ]);
+
+        // 1. منع التكرار باستخدام الـ Hash
+        $incomingHash = md5_file($request->file('audio_file')->getRealPath());
+        $existing = Verification::where('file_hash', $incomingHash)->first();
+        
+        if ($existing) {
+            return $this->successResponse($existing, 'This audio has been previously checked.');
+        }
+
+        try {
+            // 2. رفع الملف إلى Cloudinary (مع تحديد نوع المورد كـ auto/raw للصوت)
+            $upload = Cloudinary::upload(
+                $request->file('audio_file')->getRealPath(),
+                [
+                    'folder' => 'Tyaqn/audio',
+                    'resource_type' => 'auto' 
+                ]
+            );
+            $uploadedFileUrl = $upload->getSecurePath();
+
+            // 3. إرسال الملف لموديل الـ AI على Hugging Face
+            // تأكد من إضافة AUDIO_AI_URL في ملف الـ .env
+            $audioModelUrl = config('services.ai_model.audio_url'); 
+
+            $response = Http::timeout(150)->attach(
+                'file', // اسم الحقل المتوقع في FastAPI
+                file_get_contents($request->file('audio_file')->getRealPath()),
+                $request->file('audio_file')->getClientOriginalName()
+            )->post($audioModelUrl . '/verify-audio');
+
+            if ($response->successful()) {
+                $aiResult = $response->json();
+
+                // 4. ترجمة نتيجة الموديل لحالة مفهومة في قاعدة البيانات
+                $status = ($aiResult['is_authentic'] ?? false) ? 'Real' : 'Fake';
+                $confidence = $aiResult['confidence'] ?? 0;
+                $label = $aiResult['label'] ?? 'Unknown';
+
+                // 5. تخزين العملية
+                $verification = Verification::create([
+                    'user_id'            => auth()->id(),
+                    'file_hash'          => $incomingHash,
+                    'title'              => $request->title ?? 'Audio check: ' . $label,
+                    'input_data'         => $uploadedFileUrl,
+                    'type'               => 'audio',
+                    'result_status'      => $status,
+                    'description_result' => "Detection: $label, Confidence: $confidence%",
+                ]);
+
+                return $this->successResponse($verification, 'The audio has been analyzed and the result is stored.');
+            }
+
+            return $this->errorResponse('The audio AI model failed to analyze the file', 500);
+
+        } catch (\Exception $e) {
+            return $this->errorResponse('Audio processing error: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
      * جلب تاريخ الفحوصات الخاصة بالمستخدم
      */
     public function history()
