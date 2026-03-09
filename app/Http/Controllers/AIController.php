@@ -66,61 +66,54 @@ class AIController extends Controller
             'type'       => 'required|in:image,video',
             'title'      => 'nullable|string'
         ]);
-    
-        // 1. عمل Hash للملف من الـ Path المؤقت (مهم جداً للتحقق من التكرار)
-        $incomingHash = md5_file($request->file('media_file')->getRealPath());
-    
-        // 2. التحقق من وجود فحص سابق لنفس الملف في الداتا بيز
+
+        $file = $request->file('media_file');
+        $incomingHash = md5_file($file->getRealPath());
+
         $existing = Verification::where('file_hash', $incomingHash)->first();
         if ($existing) {
-            return $this->successResponse($existing, 'This file has been previously checked, here is the result recorded with us.');
+            return $this->successResponse($existing, 'Previous result found for this file.');
         }
-    
-        try {
-            $cloudinaryUrl = env('CLOUDINARY_URL');
 
-            // الرفع والحصول على النتيجة
-            $upload = Cloudinary::upload(
-                $request->file('media_file')->getRealPath(),
-                ['folder' => 'Tyaqn/media']
-            );
-        
-            // هنا السطر السحري: استخراج الرابط من نتيجة الرفع
-            $uploadedFileUrl = $upload->getSecurePath(); 
-        
-            $baseUrl = config('services.ai_model.url');
-        
-            // إرسال الرابط لموديل الـ AI
-            $response = Http::timeout(120)->attach(
-                'media_file',
-                file_get_contents($request->file('media_file')->getRealPath()),
-                $request->file('media_file')->getClientOriginalName()
-            )->post($baseUrl . '/predict-media', [
-                'type' => $request->type
-            ]);
-    
-            if ($response->successful()) {
+        return DB::transaction(function () use ($request, $file, $incomingHash) {
+            try {
+                $baseUrl = config('services.ai_model.url');
+
+                // فحص الـ AI أولاً
+                $response = Http::timeout(120)->attach(
+                    'media_file',
+                    file_get_contents($file->getRealPath()),
+                    $file->getClientOriginalName()
+                )->post($baseUrl . '/predict-media', ['type' => $request->type]);
+
+                if (!$response->successful()) {
+                    throw new \Exception('Media AI model failed to respond.');
+                }
+
                 $aiResult = $response->json();
-    
-                // 5. تخزين البيانات في قاعدة البيانات
+
+                // الرفع للسحابة بعد التأكد من الموديل
+                $upload = Cloudinary::upload($file->getRealPath(), [
+                    'folder' => 'Tyaqn/media',
+                    'resource_type' => 'auto'
+                ]);
+
                 $verification = Verification::create([
                     'user_id'            => auth()->id(),
                     'file_hash'          => $incomingHash,
-                    'title'              => $request->title ?? 'New media check',
-                    'input_data'         => $uploadedFileUrl, // هنا نخزن رابط السحابة بدلاً من Path المجلد المحلي
+                    'title'              => $request->title ?? 'New ' . $request->type . ' check',
+                    'input_data'         => $upload->getSecurePath(),
                     'type'               => $request->type,
                     'result_status'      => $aiResult['status'] ?? 'unknown',
-                    'description_result' => $aiResult['explanation'] ?? 'No explanation provided',
+                    'description_result' => $aiResult['explanation'] ?? 'Analysis complete',
                 ]);
-    
-                return $this->successResponse($verification, 'The file has been scanned and successfully stored on the cloud');
+
+                return $this->successResponse($verification, 'Media processed and stored.');
+
+            } catch (\Exception $e) {
+                return $this->errorResponse('Error: ' . $e->getMessage(), 500);
             }
-    
-            return $this->errorResponse('The media model failed to analyze the file', 500);
-    
-        } catch (\Exception $e) {
-            return $this->errorResponse('Connection or upload error: ' . $e->getMessage(), 500);
-        }
+        });
     }
 
     /**
@@ -129,66 +122,66 @@ class AIController extends Controller
     public function verifyAudio(Request $request)
     {
         $request->validate([
-            'audio_file' => 'required|file|mimes:mp3,wav,aac,m4a,flac|max:20480', // حد أقصى 20 ميجا للصوت
+            'audio_file' => 'required|file|mimes:mp3,wav,aac,m4a,flac|max:20480',
             'title'      => 'nullable|string'
         ]);
 
-        // 1. منع التكرار باستخدام الـ Hash
-        $incomingHash = md5_file($request->file('audio_file')->getRealPath());
-        $existing = Verification::where('file_hash', $incomingHash)->first();
+        // 1. التحقق من الـ Hash (خارج الترانزاكشن لتوفير الوقت)
+        $file = $request->file('audio_file');
+        $incomingHash = md5_file($file->getRealPath());
         
+        $existing = Verification::where('file_hash', $incomingHash)->first();
         if ($existing) {
             return $this->successResponse($existing, 'This audio has been previously checked.');
         }
 
-        try {
-            // 2. رفع الملف إلى Cloudinary (مع تحديد نوع المورد كـ auto/raw للصوت)
-            $upload = Cloudinary::upload(
-                $request->file('audio_file')->getRealPath(),
-                [
-                    'folder' => 'Tyaqn/audio',
-                    'resource_type' => 'auto' 
-                ]
-            );
-            $uploadedFileUrl = $upload->getSecurePath();
+        // 2. بدأ الترانزاكشن لضمان سلامة البيانات
+        return \DB::transaction(function () use ($request, $file, $incomingHash) {
+            try {
+                $audioModelUrl = config('services.ai_model.audio_url');
 
-            // 3. إرسال الملف لموديل الـ AI على Hugging Face
-            // تأكد من إضافة AUDIO_AI_URL في ملف الـ .env
-            $audioModelUrl = config('services.ai_model.audio_url'); 
+                // 3. الخطوة الأهم: نكلم الـ AI أولاً بالملف المحلي (Local Path) 
+                // مش محتاجين نرفعه لكلاودناري لسه عشان لو الموديل واقع موفر وقت
+                $response = Http::timeout(150)->attach(
+                    'file', 
+                    file_get_contents($file->getRealPath()),
+                    $file->getClientOriginalName()
+                )->post($audioModelUrl . '/verify-audio');
 
-            $response = Http::timeout(150)->attach(
-                'file', // اسم الحقل المتوقع في FastAPI
-                file_get_contents($request->file('audio_file')->getRealPath()),
-                $request->file('audio_file')->getClientOriginalName()
-            )->post($audioModelUrl . '/verify-audio');
+                if (!$response->successful()) {
+                    throw new \Exception('AI Model failed or currently unavailable.');
+                }
 
-            if ($response->successful()) {
                 $aiResult = $response->json();
 
-                // 4. ترجمة نتيجة الموديل لحالة مفهومة في قاعدة البيانات
+                // 4. الآن بما أن الـ AI رد بنجاح، نرفع لكلاودناري
+                $upload = Cloudinary::upload($file->getRealPath(), [
+                    'folder' => 'Tyaqn/audio',
+                    'resource_type' => 'auto'
+                ]);
+                $uploadedFileUrl = $upload->getSecurePath();
+
+                // 5. ترجمة النتيجة وحفظها
                 $status = ($aiResult['is_authentic'] ?? false) ? 'Real' : 'Fake';
                 $confidence = $aiResult['confidence'] ?? 0;
-                $label = $aiResult['label'] ?? 'Unknown';
 
-                // 5. تخزين العملية
                 $verification = Verification::create([
                     'user_id'            => auth()->id(),
                     'file_hash'          => $incomingHash,
-                    'title'              => $request->title ?? 'Audio check: ' . $label,
+                    'title'              => $request->title ?? 'Audio Check: ' . $aiResult['label'],
                     'input_data'         => $uploadedFileUrl,
                     'type'               => 'audio',
                     'result_status'      => $status,
-                    'description_result' => "Detection: $label, Confidence: $confidence%",
+                    'description_result' => "Detection: {$aiResult['label']}, Confidence: $confidence%",
                 ]);
 
-                return $this->successResponse($verification, 'The audio has been analyzed and the result is stored.');
+                return $this->successResponse($verification, 'Check completed and data synced.');
+
+            } catch (\Exception $e) {
+                // أي خطأ هنا هيعمل Rollback تلقائي لأي حاجة حصلت جوا الـ transaction
+                return $this->errorResponse('Process failed: ' . $e->getMessage(), 500);
             }
-
-            return $this->errorResponse('The audio AI model failed to analyze the file', 500);
-
-        } catch (\Exception $e) {
-            return $this->errorResponse('Audio processing error: ' . $e->getMessage(), 500);
-        }
+        });
     }
 
     /**
