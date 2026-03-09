@@ -2,12 +2,13 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
 use App\Models\Verification; 
-use Illuminate\Support\Facades\Http;
-use App\Traits\UploadImageTrait;
 use App\Traits\ApiResponseTrait;
+use App\Traits\UploadImageTrait;
 use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 
 class AIController extends Controller
 {
