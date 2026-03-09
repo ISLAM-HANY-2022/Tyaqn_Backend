@@ -127,7 +127,7 @@ class AIController extends Controller
             'title'      => 'nullable|string'
         ]);
 
-        // 1. التحقق من الـ Hash (خارج الترانزاكشن لتوفير الوقت)
+        // 1. التحقق من الـ Hash
         $file = $request->file('audio_file');
         $incomingHash = md5_file($file->getRealPath());
         
@@ -136,15 +136,14 @@ class AIController extends Controller
             return $this->successResponse($existing, 'This audio has been previously checked.');
         }
 
-        // 2. بدأ الترانزاكشن لضمان سلامة البيانات
+        // 2. بدأ الترانزاكشن
         return \DB::transaction(function () use ($request, $file, $incomingHash) {
             try {
                 $audioModelUrl = config('services.ai_model.audio_url');
 
-                // 3. الخطوة الأهم: نكلم الـ AI أولاً بالملف المحلي (Local Path) 
-                // مش محتاجين نرفعه لكلاودناري لسه عشان لو الموديل واقع موفر وقت
+                // 3. نكلم الـ AI أولاً
                 $response = Http::timeout(150)->attach(
-                    'file', 
+                    'file', // تأكدنا إن الاسم هنا file
                     file_get_contents($file->getRealPath()),
                     $file->getClientOriginalName()
                 )->post($audioModelUrl . '/verify-audio');
@@ -155,36 +154,36 @@ class AIController extends Controller
 
                 $aiResult = $response->json();
 
-                // 4. الآن بما أن الـ AI رد بنجاح، نرفع لكلاودناري
+                // إضافة مهمة: لو الـ AI البايثون رجع Error (زي ما برمجناه في الـ Exception هناك)
+                if (isset($aiResult['status']) && $aiResult['status'] === 'Error') {
+                    throw new \Exception('AI Error: ' . ($aiResult['explanation'] ?? 'Unknown error occurred in model.'));
+                }
+
+                // 4. الرفع لكلاودناري
                 $upload = Cloudinary::upload($file->getRealPath(), [
                     'folder' => 'Tyaqn/audio',
                     'resource_type' => 'auto'
                 ]);
                 $uploadedFileUrl = $upload->getSecurePath();
 
-                // 5. ترجمة النتيجة وحفظها
-                $status = ($aiResult['is_authentic'] ?? false) ? 'Real' : 'Fake';
-                $confidence = $aiResult['confidence'] ?? 0;
-
+                // 5. حفظ النتيجة (تم التعديل لتطابق الـ status و explanation)
                 $verification = Verification::create([
                     'user_id'            => auth()->id(),
                     'file_hash'          => $incomingHash,
-                    'title'              => $request->title ?? 'Audio Check: ' . $aiResult['label'],
+                    'title'              => $request->title ?? 'New Audio Check',
                     'input_data'         => $uploadedFileUrl,
                     'type'               => 'audio',
-                    'result_status'      => $status,
-                    'description_result' => "Detection: {$aiResult['label']}, Confidence: $confidence%",
+                    'result_status'      => $aiResult['status'] ?? 'unknown',
+                    'description_result' => $aiResult['explanation'] ?? 'Analysis complete',
                 ]);
 
                 return $this->successResponse($verification, 'Check completed and data synced.');
 
             } catch (\Exception $e) {
-                // أي خطأ هنا هيعمل Rollback تلقائي لأي حاجة حصلت جوا الـ transaction
                 return $this->errorResponse('Process failed: ' . $e->getMessage(), 500);
             }
         });
     }
-
     /**
      * جلب تاريخ الفحوصات الخاصة بالمستخدم
      */
