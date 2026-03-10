@@ -83,32 +83,29 @@ class AIController extends Controller
 
         return $this->processMedia($request,'audio_file','audio','/verify-audio','Tyaqn/audio');
     }
-    
+
     /*================ PROCESS MEDIA =================*/
     private function processMedia($request, $fileKey, $type, $endpoint, $folder)
     {
         $file = $request->file($fileKey);
         $hash = md5_file($file->getRealPath());
 
-        // البحث عن الملف بالبصمة (Hash)
         $existing = Verification::where('file_hash', $hash)->first();
 
         if ($existing) {
-            // التحقق هل الرابط لسه شغال على كلاودناري؟
             $fileHeaders = @get_headers($existing->input_data);
             if ($fileHeaders && strpos($fileHeaders[0], '200')) {
                 return $this->successResponse($existing, 'File already analyzed');
             }
-            // لو مش موجود (404)، الكود هيكمل ويحدث السجل القديم
         }
 
-        return DB::transaction(function () use ($request, $file, $hash, $type, $endpoint, $folder, $existing) {
+        // تم إضافة $fileKey هنا في سطر الـ use
+        return DB::transaction(function () use ($request, $file, $hash, $type, $endpoint, $folder, $existing, $fileKey) {
             
             $baseUrl = config('services.ai_model.url');
 
-            // إرسال الملف للـ AI
             $response = Http::timeout(150)->attach(
-                $fileKey, 
+                $fileKey, // الآن المتغير أصبح متاحاً هنا بدون أخطاء
                 file_get_contents($file->getRealPath()),
                 $file->getClientOriginalName()
             )->post($baseUrl . $endpoint);
@@ -119,7 +116,6 @@ class AIController extends Controller
 
             $aiResult = $response->json();
 
-            // الرفع لـ Cloudinary
             $upload = Cloudinary::upload($file->getRealPath(), [
                 'folder' => $folder,
                 'resource_type' => 'auto'
@@ -135,7 +131,6 @@ class AIController extends Controller
                 'description_result' => $aiResult['explanation'] ?? 'Analysis complete'
             ];
 
-            // لو السجل موجود (بس الرابط كان مكسور) بنحدثه، لو مش موجود بننشئ جديد
             if ($existing) {
                 $existing->update($data);
                 $verification = $existing;
