@@ -83,57 +83,69 @@ class AIController extends Controller
 
         return $this->processMedia($request,'audio_file','audio','/verify-audio','Tyaqn/audio');
     }
-
+    
     /*================ PROCESS MEDIA =================*/
-    private function processMedia($request,$fileKey,$type,$endpoint,$folder)
+    private function processMedia($request, $fileKey, $type, $endpoint, $folder)
     {
-
         $file = $request->file($fileKey);
-
         $hash = md5_file($file->getRealPath());
 
-        $existing = Verification::where('file_hash',$hash)->first();
+        // البحث عن الملف بالبصمة (Hash)
+        $existing = Verification::where('file_hash', $hash)->first();
 
-        if($existing){
-            return $this->successResponse($existing,'File already analyzed');
+        if ($existing) {
+            // التحقق هل الرابط لسه شغال على كلاودناري؟
+            $fileHeaders = @get_headers($existing->input_data);
+            if ($fileHeaders && strpos($fileHeaders[0], '200')) {
+                return $this->successResponse($existing, 'File already analyzed');
+            }
+            // لو مش موجود (404)، الكود هيكمل ويحدث السجل القديم
         }
 
-        return DB::transaction(function() use ($request,$file,$hash,$type,$endpoint,$folder){
-
+        return DB::transaction(function () use ($request, $file, $hash, $type, $endpoint, $folder, $existing) {
+            
             $baseUrl = config('services.ai_model.url');
 
+            // إرسال الملف للـ AI
             $response = Http::timeout(150)->attach(
-                $type.'_file',
+                $fileKey, 
                 file_get_contents($file->getRealPath()),
                 $file->getClientOriginalName()
-            )->post($baseUrl.$endpoint);
+            )->post($baseUrl . $endpoint);
 
-            if(!$response->successful()){
-                return $this->errorResponse('AI model failed',500);
+            if (!$response->successful()) {
+                return $this->errorResponse('AI model failed', 500);
             }
 
             $aiResult = $response->json();
 
-            $upload = Cloudinary::upload($file->getRealPath(),[
-                'folder'=>$folder,
-                'resource_type'=>'auto'
+            // الرفع لـ Cloudinary
+            $upload = Cloudinary::upload($file->getRealPath(), [
+                'folder' => $folder,
+                'resource_type' => 'auto'
             ]);
 
-            $verification = Verification::create([
-                'user_id'=>auth()->id(),
-                'file_hash'=>$hash,
-                'title'=>$request->title ?? 'New '.$type.' check',
-                'input_data'=>$upload->getSecurePath(),
-                'type'=>$type,
-                'result_status'=>$aiResult['status'] ?? 'unknown',
-                'description_result'=>$aiResult['explanation'] ?? 'Analysis complete'
-            ]);
+            $data = [
+                'user_id'            => auth()->id(),
+                'file_hash'          => $hash,
+                'title'              => $request->title ?? 'New ' . $type . ' check',
+                'input_data'         => $upload->getSecurePath(),
+                'type'               => $type,
+                'result_status'      => $aiResult['status'] ?? 'unknown',
+                'description_result' => $aiResult['explanation'] ?? 'Analysis complete'
+            ];
 
-            return $this->successResponse($verification,'File analyzed successfully');
+            // لو السجل موجود (بس الرابط كان مكسور) بنحدثه، لو مش موجود بننشئ جديد
+            if ($existing) {
+                $existing->update($data);
+                $verification = $existing;
+            } else {
+                $verification = Verification::create($data);
+            }
 
+            return $this->successResponse($verification, 'File analyzed successfully');
         });
     }
-
     /*================ HISTORY =================*/
     public function history()
     {
