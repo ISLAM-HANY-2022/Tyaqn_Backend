@@ -101,11 +101,14 @@ class AIController extends Controller
 
         // تم إضافة $fileKey هنا في سطر الـ use
         return DB::transaction(function () use ($request, $file, $hash, $type, $endpoint, $folder, $existing, $fileKey) {
-            
-            $baseUrl = config('services.ai_model.url');
-
+        
+            // التعديل هنا: اختيار الرابط بناءً على النوع
+            $baseUrl = ($type === 'audio') 
+                ? config('services.ai_model.audio_url') // الرابط بتاع Hugging Face
+                : config('services.ai_model.url');      // الرابط العادي للصور
+    
             $response = Http::timeout(150)->attach(
-                $fileKey, // الآن المتغير أصبح متاحاً هنا بدون أخطاء
+                $fileKey, // هيروح بـ audio_file أو image_file ولارافيل هيعرف يتعامل
                 file_get_contents($file->getRealPath()),
                 $file->getClientOriginalName()
             )->post($baseUrl . $endpoint);
