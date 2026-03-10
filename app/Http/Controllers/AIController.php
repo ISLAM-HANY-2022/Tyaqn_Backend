@@ -123,7 +123,7 @@ class AIController extends Controller
     public function verifyAudio(Request $request)
     {
         $request->validate([
-            'audio_file' => 'required|file|mimes:mp3,wav,aac,m4a,flac|max:20480',
+            'audio_file' => 'required|file|mimes:mp3, wav, aac, m4a, flac, ogg, opus|max:20480',
             'title'      => 'nullable|string'
         ]);
 
