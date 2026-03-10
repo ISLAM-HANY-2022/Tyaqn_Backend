@@ -39,7 +39,7 @@ Route::middleware('auth:sanctum')->group(function () {
     /*--- Notifications ---*/
     Route::get('/notifications', [NotificationController::class, 'index']);//✅
 
-    /*===================  CONTENT (auth)  =====================*/
+    /*=====================  CONTENT (auth)  =====================*/
     Route::get('/articles', [ArticleController::class, 'index']);//✅
     Route::get('/articles/{id}', [ArticleController::class, 'show']);//✅
     Route::get('/categories', [ArticleController::class, 'getCategories']);
