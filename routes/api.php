@@ -28,8 +28,9 @@ Route::middleware('auth:sanctum')->group(function () {
 
     /*--- AI Verification ---*/
     Route::post('/verify/text', [AIController::class, 'verifyText']);
-    Route::post('/verify/media', [AIController::class, 'verifyMedia']);//✅
-    Route::post('/verify/audio', [AIController::class, 'verifyAudio']);
+    Route::post('/verify/image', [AIController::class, 'verifyImage']);//✅
+    Route::post('/verify/video', [AIController::class, 'verifyVideo']);
+    Route::post('/verify/audio', [AIController::class, 'verifyAudio']);//✅
     Route::get('/history', [AIController::class, 'history']);//✅
 
     /*--- Profile ---*/    
