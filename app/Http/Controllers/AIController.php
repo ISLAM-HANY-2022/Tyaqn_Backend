@@ -143,7 +143,7 @@ class AIController extends Controller
 
                 // 3. نكلم الـ AI أولاً
                 $response = Http::timeout(150)->attach(
-                    'file', // تأكدنا إن الاسم هنا file
+                    'audio_file', // تأكدنا إن الاسم هنا file
                     file_get_contents($file->getRealPath()),
                     $file->getClientOriginalName()
                 )->post($audioModelUrl . '/verify-audio');
