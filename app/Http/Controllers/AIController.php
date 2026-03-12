@@ -17,37 +17,37 @@ class AIController extends Controller
     public function verifyText(Request $request)
     {
         $request->validate([
-            'text_input' => 'required|string',
+            'text_input' => 'required|string|max:'. config('uploads.max_text_chars'),
             'title' => 'nullable|string'
         ]);
 
         try {
-
-            $baseUrl = config('services.ai_model.url');
-
-            $response = Http::post($baseUrl.'/predict-text', [
+            // سحب رابط موديل النصوص تحديداً
+            $baseUrl = config('services.ai_model.text_url'); 
+    
+            $response = Http::post($baseUrl . '/predict-text', [
                 'text' => $request->text_input
             ]);
-
+    
             if (!$response->successful()) {
-                return $this->errorResponse('Text model failed',500);
+                return $this->errorResponse('Text model failed', 500);
             }
-
+    
             $aiResult = $response->json();
-
+    
             $verification = Verification::create([
-                'user_id'=>auth()->id(),
-                'title'=>$request->title ?? 'Text Check',
-                'input_data'=>$request->text_input,
-                'type'=>'text',
-                'result_status'=>$aiResult['status'],
-                'description_result'=>$aiResult['explanation']
+                'user_id'            => auth()->id(),
+                'title'              => $request->title ?? 'Text Check',
+                'input_data'         => $request->text_input,
+                'type'               => 'text',
+                'result_status'      => $aiResult['status'],
+                'description_result' => $aiResult['explanation']
             ]);
-
-            return $this->successResponse($verification,'Text analyzed successfully');
-
+    
+            return $this->successResponse($verification, 'Text analyzed successfully');
+    
         } catch (\Exception $e) {
-            return $this->errorResponse($e->getMessage(),500);
+            return $this->errorResponse($e->getMessage(), 500);
         }
     }
 
@@ -103,9 +103,12 @@ class AIController extends Controller
         return DB::transaction(function () use ($request, $file, $hash, $type, $endpoint, $folder, $existing, $fileKey) {
         
             // التعديل هنا: اختيار الرابط بناءً على النوع
-            $baseUrl = ($type === 'audio') 
-                ? config('services.ai_model.audio_url') // الرابط بتاع Hugging Face
-                : config('services.ai_model.url');      // الرابط العادي للصور
+            $baseUrl = match($type) {
+                'audio' => config('services.ai_model.audio_url'),
+                'image' => config('services.ai_model.image_url'),
+                'video' => config('services.ai_model.url'), // لو لسه ملوش رابط منفصل
+                default => config('services.ai_model.url'),
+            };
     
             $response = Http::timeout(150)->attach(
                 $fileKey, // هيروح بـ audio_file أو image_file ولارافيل هيعرف يتعامل
