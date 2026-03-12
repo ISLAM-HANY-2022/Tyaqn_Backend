@@ -104,9 +104,9 @@ class AIController extends Controller
         
             // التعديل هنا: اختيار الرابط بناءً على النوع
             $baseUrl = match($type) {
-                'audio' => config('services.ai_model.audio_url'),
-                'image' => config('services.ai_model.image_url'),
-                'video' => config('services.ai_model.url'), // لو لسه ملوش رابط منفصل
+                'image' => config('services.ai_model.url'),
+                'audio' => config('services.ai_model.audio_url'),                
+                'video' => config('services.ai_model.video_url'), 
                 default => config('services.ai_model.url'),
             };
     
