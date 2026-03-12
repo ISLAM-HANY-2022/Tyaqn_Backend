@@ -129,10 +129,18 @@ class AIController extends Controller
 
     /*================ PROCESS MEDIA =================*/
     private function processMedia($request, $fileKey, $type, $endpoint, $folder)
-    {
-        $file = $request->file($fileKey);
-        $hash = md5_file($file->getRealPath());
+{
+    $file = $request->file($fileKey);
+    $hash = md5_file($file->getRealPath());
 
+    // 1. القفل (Idempotency Lock) لمنع رفع نفس الملف مرتين في نفس اللحظة
+    $lock = Cache::lock('verify_media_' . auth()->id() . '_' . $hash, 60); // قفل لمدة دقيقة
+
+    if (!$lock->get()) {
+        return $this->errorResponse('جاري رفع ومعالجة الملف، يرجى الانتظار...', 429);
+    }
+
+    try {
         $existing = Verification::where('file_hash', $hash)->first();
 
         if ($existing) {
@@ -142,10 +150,8 @@ class AIController extends Controller
             }
         }
 
-        // تم إضافة $fileKey هنا في سطر الـ use
         return DB::transaction(function () use ($request, $file, $hash, $type, $endpoint, $folder, $existing, $fileKey) {
-        
-            // التعديل هنا: اختيار الرابط بناءً على النوع
+            
             $baseUrl = match($type) {
                 'image' => config('services.ai_model.url'),
                 'audio' => config('services.ai_model.audio_url'),                
@@ -153,14 +159,15 @@ class AIController extends Controller
                 default => config('services.ai_model.url'),
             };
     
-            $response = Http::timeout(150)->attach(
-                $fileKey, // هيروح بـ audio_file أو image_file ولارافيل هيعرف يتعامل
+            // إضافة retry لضمان استقرار الاتصال مع الموديل
+            $response = Http::timeout(150)->retry(2, 3000)->attach(
+                $fileKey, 
                 file_get_contents($file->getRealPath()),
                 $file->getClientOriginalName()
             )->post($baseUrl . $endpoint);
 
             if (!$response->successful()) {
-                return $this->errorResponse('AI model failed', 500);
+                throw new \Exception('AI model failed to respond');
             }
 
             $aiResult = $response->json();
@@ -189,7 +196,14 @@ class AIController extends Controller
 
             return $this->successResponse($verification, 'File analyzed successfully');
         });
+
+    } catch (\Exception $e) {
+        Log::error("Media Verification Error ($type): " . $e->getMessage());
+        return $this->errorResponse('حدث خطأ أثناء فحص الملف', 500);
+    } finally {
+        $lock->release(); // فك القفل
     }
+}
     /*================ HISTORY =================*/
     public function history()
     {
