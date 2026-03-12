@@ -8,6 +8,8 @@ use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class AIController extends Controller
 {
@@ -21,33 +23,74 @@ class AIController extends Controller
             'title' => 'nullable|string'
         ]);
 
+        // 1. تنظيف النص: إزالة المسافات الزائدة وأي وسوم HTML لضمان تطابق الـ Hash
+        $cleanText = trim(strip_tags($request->text_input));
+        
+        // 2. التشفير (Hashing): عمل بصمة للنص
+        $hash = md5($cleanText);
+
+        // 3. مبدأ الـ Idempotency (Atomic Locks): منع المستخدم من الضغط مرتين في نفس اللحظة
+        // اللوك ده بيقفل على (الـ ID بتاع اليوزر + بصمة النص) لمدة 10 ثواني
+        $lock = Cache::lock('verify_text_' . auth()->id() . '_' . $hash, 10);
+
+        if (!$lock->get()) {
+            return $this->errorResponse('جاري معالجة طلبك بالفعل، يرجى الانتظار...', 429);
+        }
+
         try {
-            // سحب رابط موديل النصوص تحديداً
-            $baseUrl = config('services.ai_model.text_url'); 
-    
-            $response = Http::post($baseUrl . '/predict-text', [
-                'text' => $request->text_input
-            ]);
-    
-            if (!$response->successful()) {
-                return $this->errorResponse('Text model failed', 500);
+            // 4. التحقق من وجود النص مسبقاً في قاعدة البيانات (Caching)
+            $existing = Verification::where('file_hash', $hash)->first();
+
+            if ($existing) {
+                // لو النص اتفحص قبل كدة بس عن طريق يوزر تاني، بننسخ النتيجة لليوزر الحالي عشان تظهر في الـ History بتاعه
+                if ($existing->user_id !== auth()->id()) {
+                    $newVerification = $existing->replicate();
+                    $newVerification->user_id = auth()->id();
+                    $newVerification->title = $request->title ?? 'Text Check';
+                    $newVerification->created_at = now();
+                    $newVerification->save();
+                    
+                    return $this->successResponse($newVerification, 'Text analyzed successfully (from cache)');
+                }
+                // لو هو نفس اليوزر، بنرجع له النتيجة القديمة فوراً
+                return $this->successResponse($existing, 'Text analyzed successfully (from cache)');
             }
-    
+
+            // 5. استدعاء الموديل مع ميزة الـ Retry (المحاولة التلقائية عند الفشل)
+            $baseUrl = config('services.ai_model.text_url'); 
+            
+            // جرب 3 مرات، وبين كل مرة ومرة ثانيتين (عشان لو سيرفر هجينج فيس كان نايم وبيصحى)
+            $response = Http::timeout(150)->retry(3, 2000)->post($baseUrl . '/predict-text', [
+                'text' => $cleanText
+            ]);
+
+            if (!$response->successful()) {
+                // تسجيل الخطأ الفعلي في ملفات لارافيل للمطورين
+                Log::error('AI Text Model Failed: ' . $response->body());
+                return $this->errorResponse('تعذر فحص النص حالياً، حاول مرة أخرى', 500);
+            }
+
             $aiResult = $response->json();
-    
+
+            // 6. حفظ النتيجة الجديدة
             $verification = Verification::create([
                 'user_id'            => auth()->id(),
+                'file_hash'          => $hash, // حفظ البصمة هنا مهم جداً
                 'title'              => $request->title ?? 'Text Check',
-                'input_data'         => $request->text_input,
+                'input_data'         => $cleanText,
                 'type'               => 'text',
                 'result_status'      => $aiResult['status'],
                 'description_result' => $aiResult['explanation']
             ]);
-    
+
             return $this->successResponse($verification, 'Text analyzed successfully');
-    
+
         } catch (\Exception $e) {
-            return $this->errorResponse($e->getMessage(), 500);
+            Log::error('Text Verification Exception: ' . $e->getMessage());
+            return $this->errorResponse('حدث خطأ داخلي في الخادم', 500);
+        } finally {
+            // 7. تحرير القفل فور انتهاء العملية سواء بنجاح أو فشل
+            $lock->release();
         }
     }
 
