@@ -21,7 +21,7 @@ Route::post('/password/forgot', [PasswordController::class, 'sendResetCode']);//
 Route::post('/password/verify', [PasswordController::class, 'verifyResetCode']);//✅
 Route::post('/password/reset', [PasswordController::class, 'resetPassword']);//✅
 
-/*=======================  PROTECTED ROUTES (Sanctum) =====================*/
+/*=======================  PROTECTED ROUTES (Sanctum) ========================*/
 Route::middleware('auth:sanctum')->group(function () {    
     
     Route::post('/logout', [AuthController::class, 'logout']);//✅    
@@ -40,7 +40,7 @@ Route::middleware('auth:sanctum')->group(function () {
     /*--- Notifications ---*/
     Route::get('/notifications', [NotificationController::class, 'index']);//✅
 
-    /*=====================  CONTENT (auth)  =====================*/
+    /*=======================  CONTENT (auth)  =====================*/
     Route::get('/articles', [ArticleController::class, 'index']);//✅
     Route::get('/articles/{id}', [ArticleController::class, 'show']);//✅
     Route::get('/categories', [ArticleController::class, 'getCategories']);
