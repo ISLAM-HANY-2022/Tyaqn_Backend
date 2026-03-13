@@ -21,7 +21,7 @@ Route::post('/password/forgot', [PasswordController::class, 'sendResetCode']);//
 Route::post('/password/verify', [PasswordController::class, 'verifyResetCode']);//✅
 Route::post('/password/reset', [PasswordController::class, 'resetPassword']);//✅
 
-/*====================  PROTECTED ROUTES (Sanctum) =====================*/
+/*=====================  PROTECTED ROUTES (Sanctum) =====================*/
 Route::middleware('auth:sanctum')->group(function () {    
     
     Route::post('/logout', [AuthController::class, 'logout']);//✅    
