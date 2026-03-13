@@ -129,81 +129,95 @@ class AIController extends Controller
 
     /*================ PROCESS MEDIA =================*/
     private function processMedia($request, $fileKey, $type, $endpoint, $folder)
-{
-    $file = $request->file($fileKey);
-    $hash = md5_file($file->getRealPath());
+    {
+        $file = $request->file($fileKey);
+        $hash = md5_file($file->getRealPath());
 
-    // 1. القفل (Idempotency Lock) لمنع رفع نفس الملف مرتين في نفس اللحظة
-    $lock = Cache::lock('verify_media_' . auth()->id() . '_' . $hash, 60); // قفل لمدة دقيقة
+        // 1. القفل (Idempotency Lock) لمنع رفع نفس الملف مرتين في نفس اللحظة
+        $lock = Cache::lock('verify_media_' . auth()->id() . '_' . $hash, 60); // قفل لمدة دقيقة
 
-    if (!$lock->get()) {
-        return $this->errorResponse('جاري رفع ومعالجة الملف، يرجى الانتظار...', 429);
-    }
-
-    try {
-        $existing = Verification::where('file_hash', $hash)->first();
-
-        if ($existing) {
-            $fileHeaders = @get_headers($existing->input_data);
-            if ($fileHeaders && strpos($fileHeaders[0], '200')) {
-                return $this->successResponse($existing, 'File already analyzed');
-            }
+        if (!$lock->get()) {
+            return $this->errorResponse('جاري رفع ومعالجة الملف، يرجى الانتظار...', 429);
         }
 
-        return DB::transaction(function () use ($request, $file, $hash, $type, $endpoint, $folder, $existing, $fileKey) {
-            
-            $baseUrl = match($type) {
-                'image' => config('services.ai_model.url'),
-                'audio' => config('services.ai_model.audio_url'),                
-                'video' => config('services.ai_model.video_url'), 
-                default => config('services.ai_model.url'),
-            };
-    
-            // إضافة retry لضمان استقرار الاتصال مع الموديل
-            $response = Http::timeout(150)->retry(2, 3000)->attach(
-                $fileKey, 
-                file_get_contents($file->getRealPath()),
-                $file->getClientOriginalName()
-            )->post($baseUrl . $endpoint);
-
-            if (!$response->successful()) {
-                throw new \Exception('AI model failed to respond');
-            }
-
-            $aiResult = $response->json();
-
-            $upload = Cloudinary::upload($file->getRealPath(), [
-                'folder' => $folder,
-                'resource_type' => 'auto'
-            ]);
-
-            $data = [
-                'user_id'            => auth()->id(),
-                'file_hash'          => $hash,
-                'title'              => $request->title ?? 'New ' . $type . ' check',
-                'input_data'         => $upload->getSecurePath(),
-                'type'               => $type,
-                'result_status'      => $aiResult['status'] ?? 'unknown',
-                'description_result' => $aiResult['explanation'] ?? 'Analysis complete'
-            ];
+        try {
+            $existing = Verification::where('file_hash', $hash)->first();
 
             if ($existing) {
-                $existing->update($data);
-                $verification = $existing;
-            } else {
-                $verification = Verification::create($data);
+                // التأكد أن الملف لا يزال موجوداً على السيرفر
+                $fileHeaders = @get_headers($existing->input_data);
+                if ($fileHeaders && strpos($fileHeaders[0], '200')) {
+                    
+                    // إذا كان المستخدم هو صاحب السجل الأصلي، ارجع النتيجة
+                    if ($existing->user_id === auth()->id()) {
+                        return $this->successResponse($existing, 'File already analyzed');
+                    }
+            
+                    // إذا كان مستخدم جديد، أنشئ له سجلاً خاصاً به بنفس النتائج القديمة (Replicate)
+                    $newEntry = $existing->replicate();
+                    $newEntry->user_id = auth()->id();
+                    $newEntry->title = $request->title ?? 'New ' . $type . ' check';
+                    $newEntry->created_at = now();
+                    $newEntry->save();
+            
+                    return $this->successResponse($newEntry, 'File analyzed successfully (from cache)');
+                }
             }
 
-            return $this->successResponse($verification, 'File analyzed successfully');
-        });
+            return DB::transaction(function () use ($request, $file, $hash, $type, $endpoint, $folder, $existing, $fileKey) {
+                
+                $baseUrl = match($type) {
+                    'image' => config('services.ai_model.url'),
+                    'audio' => config('services.ai_model.audio_url'),                
+                    'video' => config('services.ai_model.video_url'), 
+                    default => config('services.ai_model.url'),
+                };
+        
+                // إضافة retry لضمان استقرار الاتصال مع الموديل
+                $response = Http::timeout(150)->retry(2, 3000)->attach(
+                    $fileKey, 
+                    file_get_contents($file->getRealPath()),
+                    $file->getClientOriginalName()
+                )->post($baseUrl . $endpoint);
 
-    } catch (\Exception $e) {
-        Log::error("Media Verification Error ($type): " . $e->getMessage());
-        return $this->errorResponse('حدث خطأ أثناء فحص الملف', 500);
-    } finally {
-        $lock->release(); // فك القفل
+                if (!$response->successful()) {
+                    throw new \Exception('AI model failed to respond');
+                }
+
+                $aiResult = $response->json();
+
+                $upload = Cloudinary::upload($file->getRealPath(), [
+                    'folder' => $folder,
+                    'resource_type' => 'auto'
+                ]);
+
+                $data = [
+                    'user_id'            => auth()->id(),
+                    'file_hash'          => $hash,
+                    'title'              => $request->title ?? 'New ' . $type . ' check',
+                    'input_data'         => $upload->getSecurePath(),
+                    'type'               => $type,
+                    'result_status'      => $aiResult['status'] ?? 'unknown',
+                    'description_result' => $aiResult['explanation'] ?? 'Analysis complete'
+                ];
+
+                if ($existing) {
+                    $existing->update($data);
+                    $verification = $existing;
+                } else {
+                    $verification = Verification::create($data);
+                }
+
+                return $this->successResponse($verification, 'File analyzed successfully');
+            });
+
+        } catch (\Exception $e) {
+            Log::error("Media Verification Error ($type): " . $e->getMessage());
+            return $this->errorResponse('حدث خطأ أثناء فحص الملف', 500);
+        } finally {
+            $lock->release(); // فك القفل
+        }
     }
-}
     /*================ HISTORY =================*/
     public function history()
     {
