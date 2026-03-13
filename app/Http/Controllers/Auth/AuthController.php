@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Models\Notification;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -97,7 +98,14 @@ class AuthController extends Controller
         // 4. توليد التوكن الآن فقط لأن الحساب أصبح موثوقاً
         $token = $user->createToken('mobile-token')->plainTextToken;
         // -------------------------
-    
+        // --- الإضافة الجديدة: إنشاء إشعار الترحيب ---
+        Notification::create([
+            'user_id' => $user->id,
+            'title'   => 'Welcome to Tyaqn!',
+            'message' => 'Hello ' . $user->name . ', welcome to Tyaqn app! We are thrilled to have you on board.',
+            'is_read' => 0 
+        ]);
+        // ------------------------------------------
         return $this->successResponse([
             'user'  => $user,
             'token' => $token // بنبعت التوكن هنا عشان الموبايل يخزنه ويبدأ يستخدمه
