@@ -9,6 +9,7 @@ use App\Http\Controllers\QuizController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\BookmarksController;
+use App\Http\Controllers\ReportController;
 
 /*=====================  AUTH (Public)  ======================*/
 Route::post('/register', [AuthController::class, 'register']);//✅
@@ -47,4 +48,11 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/quizzes', [QuizController::class, 'index']);//✅
     Route::post('bookmarks/toggle/{articleId}', [BookmarksController::class, 'toggleBookmark']);
     Route::get('bookmarks', [BookmarksController::class, 'myBookmarks']);//✅
+    
+    Route::get('/reports', [ReportController::class, 'index']); // جلب كل التقارير العامة
+    Route::get('/reports/my-reports', [ReportController::class, 'myReports']); // جلب تقاريري أنا فقط
+    Route::post('/reports', [ReportController::class, 'store']); // إنشاء تقرير جديد
+    Route::get('/reports/{id}', [ReportController::class, 'show']); // عرض تقرير محدد بالتحقق بتاعه
+    Route::get('/reports/{id}/status', [ReportController::class, 'showReportStatus']); // عرض تفاصيل حالة التقرير
+    Route::delete('/reports/{id}', [ReportController::class, 'destroy']); // حذف التقرير
 });
