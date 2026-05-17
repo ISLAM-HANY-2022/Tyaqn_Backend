@@ -149,7 +149,7 @@ class AIController extends Controller
         $hash = md5_file($file->getRealPath());
 
         // 1. القفل (Idempotency Lock) لمنع رفع نفس الملف مرتين في نفس اللحظة
-        $lock = Cache::lock('verify_media_' . auth()->id() . '_' . $hash, 60); // قفل لمدة دقيقة
+        $lock = Cache::lock('verify_media_' . auth()->id() . '_' . $hash, 60);
 
         if (!$lock->get()) {
             return $this->errorResponse('جاري رفع ومعالجة الملف، يرجى الانتظار...', 429);
@@ -163,19 +163,32 @@ class AIController extends Controller
                 $fileHeaders = @get_headers($existing->input_data);
                 if ($fileHeaders && strpos($fileHeaders[0], '200')) {
                     
-                    // إذا كان المستخدم هو صاحب السجل الأصلي، ارجع النتيجة
+                    // الخدعة الذكية: استخراج النسبة المئوية القديمة من حقل النص لضمان استقرار الفلاتر من الكاش
+                    preg_match('/([0-9.]+)\s*%/', $existing->description_result, $matches);
+                    $ai_percentage = isset($matches[1]) ? (float)$matches[1] : 0;
+                    $human_percentage = 100 - $ai_percentage;
+
+                    // إذا كان المستخدم هو صاحب السجل الأصلي
                     if ($existing->user_id === auth()->id()) {
-                        return $this->successResponse($existing, 'File already analyzed');
+                        $cachedData = $existing->toArray();
+                        $cachedData['ai_percentage'] = $ai_percentage;
+                        $cachedData['human_percentage'] = $human_percentage;
+
+                        return $this->successResponse($cachedData, 'File already analyzed (from cache)');
                     }
             
-                    // إذا كان مستخدم جديد، أنشئ له سجلاً خاصاً به بنفس النتائج القديمة (Replicate)
+                    // إذا كان مستخدم جديد، أنشئ له سجلاً خاصاً به (Replicate)
                     $newEntry = $existing->replicate();
                     $newEntry->user_id = auth()->id();
                     $newEntry->title = $request->title ?? 'New ' . $type . ' check';
                     $newEntry->created_at = now();
                     $newEntry->save();
             
-                    return $this->successResponse($newEntry, 'File analyzed successfully (from cache)');
+                    $cachedData = $newEntry->toArray();
+                    $cachedData['ai_percentage'] = $ai_percentage;
+                    $cachedData['human_percentage'] = $human_percentage;
+
+                    return $this->successResponse($cachedData, 'File analyzed successfully (from cache)');
                 }
             }
 
@@ -188,7 +201,7 @@ class AIController extends Controller
                     default => config('services.ai_model.url'),
                 };
         
-                // إضافة retry لضمان استقرار الاتصال مع الموديل
+                // استدعاء الموديل مع الـ Retry
                 $response = Http::timeout(150)->retry(2, 3000)->attach(
                     $fileKey, 
                     file_get_contents($file->getRealPath()),
@@ -196,11 +209,12 @@ class AIController extends Controller
                 )->post($baseUrl . $endpoint);
 
                 if (!$response->successful()) {
-                    throw new \Exception('AI model failed to respond');
+                    throw new \Exception("AI model ($type) failed to respond: " . $response->body());
                 }
 
                 $aiResult = $response->json();
 
+                // رفع الملف على كلوديناري
                 $upload = Cloudinary::upload($file->getRealPath(), [
                     'folder' => $folder,
                     'resource_type' => 'auto'
@@ -211,6 +225,7 @@ class AIController extends Controller
                     'file_hash'          => $hash,
                     'title'              => $request->title ?? 'New ' . $type . ' check',
                     'input_data'         => $upload->getSecurePath(),
+                    'type'               => 'type',
                     'type'               => $type,
                     'result_status'      => $aiResult['status'] ?? 'unknown',
                     'description_result' => $aiResult['explanation'] ?? 'Analysis complete'
@@ -223,14 +238,19 @@ class AIController extends Controller
                     $verification = Verification::create($data);
                 }
 
-                return $this->successResponse($verification, 'File analyzed successfully');
+                // حقن النسب بشكل مباشر لرد الـ API النهائي لراحة الفلاتر
+                $responseData = $verification->toArray();
+                $responseData['ai_percentage'] = $aiResult['ai_percentage'] ?? 0;
+                $responseData['human_percentage'] = $aiResult['human_percentage'] ?? 0;
+
+                return $this->successResponse($responseData, 'File analyzed successfully');
             });
 
         } catch (\Exception $e) {
             Log::error("Media Verification Error ($type): " . $e->getMessage());
             return $this->errorResponse('حدث خطأ أثناء فحص الملف', 500);
         } finally {
-            $lock->release(); // فك القفل
+            $lock->release(); // فك القفل دائماً
         }
     }
     /*================ HISTORY =================*/
