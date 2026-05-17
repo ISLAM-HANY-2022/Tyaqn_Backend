@@ -159,36 +159,38 @@ class AIController extends Controller
             $existing = Verification::where('file_hash', $hash)->first();
 
             if ($existing) {
-                // التأكد أن الملف لا يزال موجوداً على السيرفر
-                $fileHeaders = @get_headers($existing->input_data);
-                if ($fileHeaders && strpos($fileHeaders[0], '200')) {
-                    
-                    // الخدعة الذكية: استخراج النسبة المئوية القديمة من حقل النص لضمان استقرار الفلاتر من الكاش
-                    preg_match('/([0-9.]+)\s*%/', $existing->description_result, $matches);
-                    $ai_percentage = isset($matches[1]) ? (float)$matches[1] : 0;
-                    $real_percentage = 100 - $ai_percentage;
-
-                    // إذا كان المستخدم هو صاحب السجل الأصلي
-                    if ($existing->user_id === auth()->id()) {
-                        $cachedData = $existing->toArray();
+                // التعديل: تخطي الكاش إذا كانت النتيجة المخزنة سابقاً خطأ
+                if ($existing->result_status !== 'Error') {
+                    // التأكد أن الملف لا يزال موجوداً على السيرفر
+                    $fileHeaders = @get_headers($existing->input_data);
+                    if ($fileHeaders && strpos($fileHeaders[0], '200')) {
+                        
+                        preg_match('/([0-9.]+)\s*%/', $existing->description_result, $matches);
+                        $ai_percentage = isset($matches[1]) ? (float)$matches[1] : 0;
+                        $real_percentage = 100 - $ai_percentage; // تحديث المتغير هنا
+            
+                        // إذا كان المستخدم هو صاحب السجل الأصلي
+                        if ($existing->user_id === auth()->id()) {
+                            $cachedData = $existing->toArray();
+                            $cachedData['ai_percentage'] = $ai_percentage;
+                            $cachedData['real_percentage'] = $real_percentage; // تحديث المفتاح
+            
+                            return $this->successResponse($cachedData, 'File already analyzed (from cache)');
+                        }
+                
+                        // إذا كان مستخدم جديد، أنشئ له سجلاً خاصاً به (Replicate)
+                        $newEntry = $existing->replicate();
+                        $newEntry->user_id = auth()->id();
+                        $newEntry->title = $request->title ?? 'New ' . $type . ' check';
+                        $newEntry->created_at = now();
+                        $newEntry->save();
+                
+                        $cachedData = $newEntry->toArray();
                         $cachedData['ai_percentage'] = $ai_percentage;
-                        $cachedData['real_percentage'] = $real_percentage;
-
-                        return $this->successResponse($cachedData, 'File already analyzed (from cache)');
+                        $cachedData['real_percentage'] = $real_percentage; // تحديث المفتاح
+            
+                        return $this->successResponse($cachedData, 'File analyzed successfully (from cache)');
                     }
-            
-                    // إذا كان مستخدم جديد، أنشئ له سجلاً خاصاً به (Replicate)
-                    $newEntry = $existing->replicate();
-                    $newEntry->user_id = auth()->id();
-                    $newEntry->title = $request->title ?? 'New ' . $type . ' check';
-                    $newEntry->created_at = now();
-                    $newEntry->save();
-            
-                    $cachedData = $newEntry->toArray();
-                    $cachedData['ai_percentage'] = $ai_percentage;
-                    $cachedData['real_percentage'] = $real_percentage;
-
-                    return $this->successResponse($cachedData, 'File analyzed successfully (from cache)');
                 }
             }
 
@@ -213,7 +215,11 @@ class AIController extends Controller
                 }
 
                 $aiResult = $response->json();
-
+                
+                // 🔥 التعديل الجوهري: منع رفع وحفظ الأخطاء في الداتابيز
+                if (isset($aiResult['status']) && $aiResult['status'] === 'Error') {
+                    return $this->errorResponse($aiResult['explanation'] ?? 'فشل سيرفر الموديل في معالجة الملف', 422);
+                }
                 // رفع الملف على كلوديناري
                 $upload = Cloudinary::upload($file->getRealPath(), [
                     'folder' => $folder,
@@ -224,8 +230,7 @@ class AIController extends Controller
                     'user_id'            => auth()->id(),
                     'file_hash'          => $hash,
                     'title'              => $request->title ?? 'New ' . $type . ' check',
-                    'input_data'         => $upload->getSecurePath(),
-                    'type'               => 'type',
+                    'input_data'         => $upload->getSecurePath(),                    
                     'type'               => $type,
                     'result_status'      => $aiResult['status'] ?? 'unknown',
                     'description_result' => $aiResult['explanation'] ?? 'Analysis complete'
