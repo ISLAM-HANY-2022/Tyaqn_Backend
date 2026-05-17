@@ -42,7 +42,7 @@ class AIController extends Controller
                // الخدعة: استخراج النسبة من النص المخزن في الداتابيز
                preg_match('/([0-9.]+)\s*%/', $existing->description_result, $matches);
                $ai_percentage = isset($matches[1]) ? (float)$matches[1] : 0;
-               $human_percentage = 100 - $ai_percentage;
+               $real_percentage = 100 - $ai_percentage;
 
                if ($existing->user_id !== auth()->id()) {
                    $newVerification = $existing->replicate();
@@ -54,7 +54,7 @@ class AIController extends Controller
                    // حقن النسب في النسخة الجديدة
                    $cachedData = $newVerification->toArray();
                    $cachedData['ai_percentage'] = $ai_percentage;
-                   $cachedData['human_percentage'] = $human_percentage;
+                   $cachedData['real_percentage'] = $real_percentage;
 
                    return $this->successResponse($cachedData, 'Text analyzed successfully (from cache)');
                }
@@ -62,7 +62,7 @@ class AIController extends Controller
                // حقن النسب في النسخة الحالية
                $cachedData = $existing->toArray();
                $cachedData['ai_percentage'] = $ai_percentage;
-               $cachedData['human_percentage'] = $human_percentage;
+               $cachedData['real_percentage'] = $real_percentage;
 
                return $this->successResponse($cachedData, 'Text analyzed successfully (from cache)');
            }
@@ -95,7 +95,7 @@ class AIController extends Controller
            // 6. حقن (Inject) نسب الذكاء الاصطناعي والبشر بشكل منفصل لمبرمج الفلاتر
            $responseData = $verification->toArray();
            $responseData['ai_percentage'] = $aiResult['ai_percentage'] ?? 0;
-           $responseData['human_percentage'] = $aiResult['human_percentage'] ?? 0;
+           $responseData['real_percentage'] = $aiResult['real_percentage'] ?? 0;
 
            // الرد النهائي السليم 100%
            return $this->successResponse($responseData, 'Text analyzed successfully');
@@ -166,13 +166,13 @@ class AIController extends Controller
                     // الخدعة الذكية: استخراج النسبة المئوية القديمة من حقل النص لضمان استقرار الفلاتر من الكاش
                     preg_match('/([0-9.]+)\s*%/', $existing->description_result, $matches);
                     $ai_percentage = isset($matches[1]) ? (float)$matches[1] : 0;
-                    $human_percentage = 100 - $ai_percentage;
+                    $real_percentage = 100 - $ai_percentage;
 
                     // إذا كان المستخدم هو صاحب السجل الأصلي
                     if ($existing->user_id === auth()->id()) {
                         $cachedData = $existing->toArray();
                         $cachedData['ai_percentage'] = $ai_percentage;
-                        $cachedData['human_percentage'] = $human_percentage;
+                        $cachedData['real_percentage'] = $real_percentage;
 
                         return $this->successResponse($cachedData, 'File already analyzed (from cache)');
                     }
@@ -186,7 +186,7 @@ class AIController extends Controller
             
                     $cachedData = $newEntry->toArray();
                     $cachedData['ai_percentage'] = $ai_percentage;
-                    $cachedData['human_percentage'] = $human_percentage;
+                    $cachedData['real_percentage'] = $real_percentage;
 
                     return $this->successResponse($cachedData, 'File analyzed successfully (from cache)');
                 }
@@ -241,7 +241,7 @@ class AIController extends Controller
                 // حقن النسب بشكل مباشر لرد الـ API النهائي لراحة الفلاتر
                 $responseData = $verification->toArray();
                 $responseData['ai_percentage'] = $aiResult['ai_percentage'] ?? 0;
-                $responseData['human_percentage'] = $aiResult['human_percentage'] ?? 0;
+                $responseData['real_percentage'] = $aiResult['real_percentage'] ?? 0;
 
                 return $this->successResponse($responseData, 'File analyzed successfully');
             });
