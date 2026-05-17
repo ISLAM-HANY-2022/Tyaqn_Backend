@@ -32,6 +32,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/verify/image', [AIController::class, 'verifyImage']);//✅
     Route::post('/verify/video', [AIController::class, 'verifyVideo']);
     Route::post('/verify/audio', [AIController::class, 'verifyAudio']);//✅
+    Route::post('/verify/video', [AIController::class, 'verifyVideo']);//✅
     Route::get('/history', [AIController::class, 'history']);//✅
 
     /*--- Profile ---*/    
