@@ -101,8 +101,16 @@ class ProcessMediaVerification implements ShouldQueue
 
             // [ملاحظة مستقبلية للـ Real-time اللحظي]: 
             // هنا المكان الأنسب لبث الـ Event لتنبيه مبرمج الفلاتر فجأة عبر ويب سوكيت (Reverb/Pusher)
-             event(new \App\Events\MediaVerified($verification));
+            $ai_val = $aiResult['ai_percentage'] ?? 0;
+            $real_val = $aiResult['real_percentage'] ?? (100 - $ai_val);
 
+            // الآن استدع الـ Event مع المتغيرات المعرفة
+            event(new \App\Events\MediaVerificationCompleted(
+                $verification, 
+                $ai_val, 
+                $real_val
+            ));
+            
         } catch (\Exception $e) {
             Log::error("Queue Job Media Verification Error ({$this->type}): " . $e->getMessage());
             $verification->update([

@@ -4,44 +4,48 @@ namespace App\Events;
 
 use App\Models\Verification;
 use Illuminate\Broadcasting\Channel;
-use Illuminate\Broadcasting\InteractsWithSockets;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 use Illuminate\Queue\SerializesModels;
 
-// استخدام ShouldBroadcastNow للبث الفوري دون الدخول في طوابير إضافية
 class MediaVerificationCompleted implements ShouldBroadcastNow 
 {
-    use Dispatchable, InteractsWithSockets, SerializesModels;
+    use Dispatchable, SerializesModels;
 
     public $verification;
+    public $aiPercentage; // أضفنا الخاصية هنا
+    public $realPercentage; // أضفنا الخاصية هنا
 
-    public function __construct(Verification $verification)
+    public function __construct(Verification $verification, $aiPercentage, $realPercentage)
     {
         $this->verification = $verification;
+        $this->aiPercentage = $aiPercentage;
+        $this->realPercentage = $realPercentage;
     }
 
-    // تحديد اسم القناة التي سيستمع إليها فلاتر (قناة خاصة بكل مستخدم)
     public function broadcastOn(): array
     {
-        return [
-            new Channel('user.' . $this->verification->user_id),
-        ];
+        return [new Channel('user.' . $this->verification->user_id)];
     }
 
-    // تحديد اسم الحدث
     public function broadcastAs(): string
     {
         return 'verification.completed';
     }
 
-    // البيانات التي ستصل لفلاتر
     public function broadcastWith(): array
     {
         return [
-            'id' => $this->verification->id,
-            'status' => $this->verification->result_status,
-            'description' => $this->verification->description_result,
+            'status' => true,
+            'message' => 'Media analyzed successfully',
+            'data' => [
+                'id' => $this->verification->id,
+                'result_status' => $this->verification->result_status,
+                'description_result' => $this->verification->description_result,
+                'ai_percentage' => $this->aiPercentage,      // النسبة اللي أنت حسبتها
+                'real_percentage' => $this->realPercentage,  // النسبة اللي أنت حسبتها
+                'updated_at' => $this->verification->updated_at,
+            ]
         ];
     }
 }
