@@ -148,7 +148,7 @@ class AIController extends Controller
         $file = $request->file($fileKey);
         $hash = md5_file($file->getRealPath());
 
-        // 1. القفل (Idempotency Lock) لمنع رفع نفس الملف مرتين في نفس اللحظة
+        // 1. القفل الأمني لمنع تكرار الطلبات المتطابقة في نفس اللحظة
         $lock = Cache::lock('verify_media_' . auth()->id() . '_' . $hash, 60);
 
         if (!$lock->get()) {
@@ -159,26 +159,23 @@ class AIController extends Controller
             $existing = Verification::where('file_hash', $hash)->first();
 
             if ($existing) {
-                // التعديل: تخطي الكاش إذا كانت النتيجة المخزنة سابقاً خطأ
-                if ($existing->result_status !== 'Error') {
-                    // التأكد أن الملف لا يزال موجوداً على السيرفر
+                // تخطي الكاش إذا كانت النتيجة السابقة خطأ أو قيد المعالجة
+                if ($existing->result_status !== 'Error' && $existing->result_status !== 'pending') {
                     $fileHeaders = @get_headers($existing->input_data);
                     if ($fileHeaders && strpos($fileHeaders[0], '200')) {
                         
                         preg_match('/([0-9.]+)\s*%/', $existing->description_result, $matches);
                         $ai_percentage = isset($matches[1]) ? (float)$matches[1] : 0;
-                        $real_percentage = 100 - $ai_percentage; // تحديث المتغير هنا
-            
-                        // إذا كان المستخدم هو صاحب السجل الأصلي
+                        $real_percentage = 100 - $ai_percentage;
+
                         if ($existing->user_id === auth()->id()) {
                             $cachedData = $existing->toArray();
                             $cachedData['ai_percentage'] = $ai_percentage;
-                            $cachedData['real_percentage'] = $real_percentage; // تحديث المفتاح
-            
+                            $cachedData['real_percentage'] = $real_percentage;
+
                             return $this->successResponse($cachedData, 'File already analyzed (from cache)');
                         }
                 
-                        // إذا كان مستخدم جديد، أنشئ له سجلاً خاصاً به (Replicate)
                         $newEntry = $existing->replicate();
                         $newEntry->user_id = auth()->id();
                         $newEntry->title = $request->title ?? 'New ' . $type . ' check';
@@ -187,75 +184,54 @@ class AIController extends Controller
                 
                         $cachedData = $newEntry->toArray();
                         $cachedData['ai_percentage'] = $ai_percentage;
-                        $cachedData['real_percentage'] = $real_percentage; // تحديث المفتاح
-            
+                        $cachedData['real_percentage'] = $real_percentage;
+
                         return $this->successResponse($cachedData, 'File analyzed successfully (from cache)');
                     }
+                } elseif ($existing->result_status === 'pending') {
+                    // إذا كان الملف يجرى فحصه حالياً في طابور آخر، نبلغ المستخدم فوراً بذكاء دون تكرار
+                    return $this->successResponse($existing->toArray(), 'هذا الملف قيد المعالجة في الخلفية حالياً، يرجى الانتظار.', 202);
                 }
             }
 
-            return DB::transaction(function () use ($request, $file, $hash, $type, $endpoint, $folder, $existing, $fileKey) {
-                
-                $baseUrl = match($type) {
-                    'image' => config('services.ai_model.url'),
-                    'audio' => config('services.ai_model.audio_url'),                
-                    'video' => config('services.ai_model.video_url'), 
-                    default => config('services.ai_model.url'),
-                };
-        
-                // استدعاء الموديل مع الـ Retry
-                $response = Http::timeout(150)->retry(2, 3000)->attach(
-                    $fileKey, 
-                    file_get_contents($file->getRealPath()),
-                    $file->getClientOriginalName()
-                )->post($baseUrl . $endpoint);
+            // 2. تخزين الملف بشكل مؤقت محلياً ليتمكن الـ Worker من قراءته بالخلفية
+            $tempName = time() . '_' . rand(100, 999) . '_' . $file->getClientOriginalName();
+            $file->storeAs('temp_media', $tempName, 'local'); 
+            $tempPath = storage_path('app/temp_media/' . $tempName);
 
-                if (!$response->successful()) {
-                    throw new \Exception("AI model ($type) failed to respond: " . $response->body());
-                }
+            // 3. إنشاء سجل أولي بحالة معلقة (Pending) ليراه المستخدم في صفحة الـ History
+            $verification = Verification::create([
+                'user_id'            => auth()->id(),
+                'file_hash'          => $hash,
+                'title'              => $request->title ?? 'New ' . $type . ' check',
+                'input_data'         => 'pending_upload', 
+                'type'               => $type,
+                'result_status'      => 'pending',
+                'description_result' => 'جاري فحص الملف ومعالجة البيانات في الخلفية، ستظهر النتيجة فور الانتهاء...'
+            ]);
 
-                $aiResult = $response->json();
-                
-                // 🔥 التعديل الجوهري: منع رفع وحفظ الأخطاء في الداتابيز
-                if (isset($aiResult['status']) && $aiResult['status'] === 'Error') {
-                    return $this->errorResponse($aiResult['explanation'] ?? 'فشل سيرفر الموديل في معالجة الملف', 422);
-                }
-                // رفع الملف على كلوديناري
-                $upload = Cloudinary::upload($file->getRealPath(), [
-                    'folder' => $folder,
-                    'resource_type' => 'auto'
-                ]);
+            // 4. دفع الوظيفة إلى الطابور ليقوم النظام بجدولتها وتنفيذها صامتاً
+            \App\Jobs\ProcessMediaVerification::dispatch(
+                $verification->id,
+                $tempPath,
+                $fileKey,
+                $type,
+                $endpoint,
+                $folder,
+                $file->getClientOriginalName()
+            );
 
-                $data = [
-                    'user_id'            => auth()->id(),
-                    'file_hash'          => $hash,
-                    'title'              => $request->title ?? 'New ' . $type . ' check',
-                    'input_data'         => $upload->getSecurePath(),                    
-                    'type'               => $type,
-                    'result_status'      => $aiResult['status'] ?? 'unknown',
-                    'description_result' => $aiResult['explanation'] ?? 'Analysis complete'
-                ];
-
-                if ($existing) {
-                    $existing->update($data);
-                    $verification = $existing;
-                } else {
-                    $verification = Verification::create($data);
-                }
-
-                // حقن النسب بشكل مباشر لرد الـ API النهائي لراحة الفلاتر
-                $responseData = $verification->toArray();
-                $responseData['ai_percentage'] = $aiResult['ai_percentage'] ?? 0;
-                $responseData['real_percentage'] = $aiResult['real_percentage'] ?? 0;
-
-                return $this->successResponse($responseData, 'File analyzed successfully');
-            });
+            // 5. الرد السريع والنهائي بـ 202 لإغلاق الإتصال فوراً في بوست مان وفلاتر ومنع الـ Timeout
+            return $this->successResponse(
+                $verification->toArray(), 
+                'تم استلام الملف بنجاح وبدء المعالجة بالخلفية.', 202
+            );
 
         } catch (\Exception $e) {
             Log::error("Media Verification Error ($type): " . $e->getMessage());
             return $this->errorResponse('حدث خطأ أثناء فحص الملف', 500);
         } finally {
-            $lock->release(); // فك القفل دائماً
+            $lock->release(); 
         }
     }
     /*================ HISTORY =================*/
