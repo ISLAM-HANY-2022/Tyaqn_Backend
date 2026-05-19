@@ -16,8 +16,7 @@ class ProcessMediaVerification implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    // تحديد وقت أقصى لتنفيذ الوظيفة (5 دقائق للفيديوهات الكبيرة) لضمان عدم توقف الكيوجوب
-    public $timeout = 300;
+    public $timeout = 450; // زيادة الوقت لضمان معالجة الفيديوهات الكبيرة في الخلفية مبروك
 
     protected $verificationId;
     protected $tempPath;
@@ -41,11 +40,8 @@ class ProcessMediaVerification implements ShouldQueue
     public function handle()
     {
         $verification = Verification::find($this->verificationId);
-        if (!$verification) {
-            return;
-        }
+        if (!$verification) return;
 
-        // التأكد من أن الملف المؤقت موجود على السيرفر ولم يُحذف
         if (!file_exists($this->tempPath)) {
             Log::error("Temp file not found for verification ID: {$this->verificationId}");
             $verification->update([
@@ -63,12 +59,20 @@ class ProcessMediaVerification implements ShouldQueue
                 default => config('services.ai_model.url'),
             };
 
-            // 1. استدعاء موديل الـ AI من هجينج فيس مع مهلة زمنية مريحة
-            $response = Http::timeout(250)->retry(2, 4000)->attach(
+            // الحل السريع والمستقر: فتح الملف كـ Stream (رابط مباشر للهارد) بدل قراءته بالكامل في الذاكرة
+            $fileStream = fopen($this->tempPath, 'r');
+
+            // 1. إرسال تدفقي (Streaming) فوراً لموديل الـ AI لمنع الـ Memory Crash
+            $response = Http::timeout(350)->retry(2, 5000)->attach(
                 $this->fileKey, 
-                file_get_contents($this->tempPath),
+                $fileStream, 
                 $this->originalName
             )->post($baseUrl . $this->endpoint);
+
+            // غلق الـ Stream بأمان بعد الإرسال
+            if (is_resource($fileStream)) {
+                fclose($fileStream);
+            }
 
             if (!$response->successful()) {
                 throw new \Exception("AI model ({$this->type}) failed to respond: " . $response->body());
@@ -76,53 +80,51 @@ class ProcessMediaVerification implements ShouldQueue
 
             $aiResult = $response->json();
 
-            // معالجة حالة إرجاع خطأ من الـ AI Space نفسه
             if (isset($aiResult['status']) && $aiResult['status'] === 'Error') {
                 $verification->update([
                     'result_status' => 'Error',
                     'description_result' => $aiResult['explanation'] ?? 'فشل سيرفر الموديل في معالجة الملف'
                 ]);
-                $this->cleanup();
                 return;
             }
 
-            // 2. رفع الملف على كلوديناري لحفظ الرابط الآمن
+            // 2. رفع الملف على كلوديناري لحفظ الرابط السحابي للمستقبل
             $upload = Cloudinary::upload($this->tempPath, [
                 'folder' => $this->folder,
                 'resource_type' => 'auto'
             ]);
 
-            // 3. تحديث السجل الفعلي بالنتائج النهائية وتغيير الحالة من pending إلى الحالة الجديدة
+            // 3. تحديث قاعدة البيانات بالنتيجة والرابط المستقر
             $verification->update([
                 'input_data'         => $upload->getSecurePath(),
                 'result_status'      => $aiResult['status'] ?? 'unknown',
                 'description_result' => $aiResult['explanation'] ?? 'Analysis complete'
             ]);
 
-            // [ملاحظة مستقبلية للـ Real-time اللحظي]: 
-            // هنا المكان الأنسب لبث الـ Event لتنبيه مبرمج الفلاتر فجأة عبر ويب سوكيت (Reverb/Pusher)
-            $ai_val = $aiResult['ai_percentage'] ?? 0;
-            $real_val = $aiResult['real_percentage'] ?? (100 - $ai_val);
+            // 4. استخراج النسب بدقة لإرسالها للـ Event
+            $ai_val = 0;
+            preg_match('/([0-9.]+)\s*%/', $verification->description_result, $matches);
+            if (isset($matches[1])) {
+                $ai_val = (float)$matches[1];
+            } elseif (isset($aiResult['ai_percentage'])) {
+                $ai_val = (float)$aiResult['ai_percentage'];
+            }
+            $real_val = 100 - $ai_val;
 
-            // الآن استدع الـ Event مع المتغيرات المعرفة
-            event(new \App\Events\MediaVerificationCompleted(
-                $verification, 
-                $ai_val, 
-                $real_val
-            ));
+            // بث الحدث اللحظي للـ Flutter
+            event(new \App\Events\MediaVerificationCompleted($verification, $ai_val, $real_val));
             
         } catch (\Exception $e) {
             Log::error("Queue Job Media Verification Error ({$this->type}): " . $e->getMessage());
             $verification->update([
                 'result_status' => 'Error',
-                'description_result' => 'حدث خطأ غير متوقع أثناء فحص الملف في الخلفية.'
+                'description_result' => 'حدث خطأ غير متوقع أثناء معالجة الملف: ' . $e->getMessage()
             ]);
         } finally {
             $this->cleanup();
         }
     }
 
-    // دالة داخلية لتنظيف السيرفر وحذف الملف المؤقت لعدم استهلاك مساحة القرص
     protected function cleanup()
     {
         if (file_exists($this->tempPath)) {
