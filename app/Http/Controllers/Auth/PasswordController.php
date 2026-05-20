@@ -16,7 +16,7 @@ class PasswordController extends Controller
 {
     use ApiResponseTrait;
 
-    // 1. إرسال الكود للإيميل
+    //// 1. إرسال الكود للإيميل
     public function sendResetCode(Request $request)
     {
         $validator = Validator::make($request->all(), [
