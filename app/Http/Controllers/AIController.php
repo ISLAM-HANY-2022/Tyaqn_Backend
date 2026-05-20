@@ -303,7 +303,8 @@ class AIController extends Controller
                 $type,
                 $endpoint,
                 $folder,
-                $file->getClientOriginalName()
+                $file->getClientOriginalName(),
+                $hash
             );
 
             return $this->successResponse($verification->toArray(), 'تم استلام الملف بنجاح وبدء إعادة المعالجة.', 202);

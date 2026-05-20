@@ -25,8 +25,9 @@ class ProcessMediaVerification implements ShouldQueue
     protected $endpoint;
     protected $folder;
     protected $originalName;
+    protected $hash;
 
-    public function __construct($verificationId, $tempPath, $fileKey, $type, $endpoint, $folder, $originalName)
+    public function __construct($verificationId, $tempPath, $fileKey, $type, $endpoint, $folder, $originalName, $hash)
     {
         $this->verificationId = $verificationId;
         $this->tempPath = $tempPath;
@@ -35,6 +36,7 @@ class ProcessMediaVerification implements ShouldQueue
         $this->endpoint = $endpoint;
         $this->folder = $folder;
         $this->originalName = $originalName;
+        $this->hash = $hash;
     }
 
     public function handle()
@@ -90,8 +92,10 @@ class ProcessMediaVerification implements ShouldQueue
 
             // 2. رفع الملف على كلوديناري لحفظ الرابط السحابي للمستقبل
             $upload = Cloudinary::upload($this->tempPath, [
-                'folder' => $this->folder,
-                'resource_type' => 'auto'
+                'folder'        => $this->folder,
+                'public_id'     => $this->hash, // **هنا السحر: استخدام الـ Hash كاسم ثابت**
+                'resource_type' => 'auto',
+                'overwrite'     => true         // **هنا التأكيد: تحديث القديم بدلاً من خلق نسخة جديدة**
             ]);
 
             // 3. تحديث قاعدة البيانات بالنتيجة والرابط المستقر
