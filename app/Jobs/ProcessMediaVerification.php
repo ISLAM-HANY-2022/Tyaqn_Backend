@@ -41,9 +41,15 @@ class ProcessMediaVerification implements ShouldQueue
 
     public function handle()
     {
+        // 1. جلب الموديل والتأكد من وجوده
         $verification = Verification::find($this->verificationId);
         if (!$verification) return;
-
+    
+        // 2. تهيئة المتغيرات في البداية لتجنب خطأ Undefined variable
+        $ai_val = 0.0;
+        $real_val = 0.0;
+    
+        // 3. التأكد من وجود الملف المؤقت
         if (!file_exists($this->tempPath)) {
             Log::error("Temp file not found for verification ID: {$this->verificationId}");
             $verification->update([
@@ -52,36 +58,37 @@ class ProcessMediaVerification implements ShouldQueue
             ]);
             return;
         }
-
+    
         try {
+            // تحديد رابط الموديل بناءً على النوع
             $baseUrl = match($this->type) {
                 'image' => config('services.ai_model.url'),
                 'audio' => config('services.ai_model.audio_url'),                
                 'video' => config('services.ai_model.video_url'), 
                 default => config('services.ai_model.url'),
             };
-
-            // الحل السريع والمستقر: فتح الملف كـ Stream (رابط مباشر للهارد) بدل قراءته بالكامل في الذاكرة
+    
+            // فتح الملف كـ Stream لتقليل استهلاك الذاكرة
             $fileStream = fopen($this->tempPath, 'r');
-
-            // 1. إرسال تدفقي (Streaming) فوراً لموديل الـ AI لمنع الـ Memory Crash
+    
+            // إرسال الطلب للموديل
             $response = Http::timeout(350)->retry(2, 5000)->attach(
                 $this->fileKey, 
                 $fileStream, 
                 $this->originalName
             )->post($baseUrl . $this->endpoint);
-
-            // غلق الـ Stream بأمان بعد الإرسال
+    
             if (is_resource($fileStream)) {
                 fclose($fileStream);
             }
-
+    
             if (!$response->successful()) {
                 throw new \Exception("AI model ({$this->type}) failed to respond: " . $response->body());
             }
-
+    
             $aiResult = $response->json();
-
+    
+            // معالجة خطأ من الموديل نفسه
             if (isset($aiResult['status']) && $aiResult['status'] === 'Error') {
                 $verification->update([
                     'result_status' => 'Error',
@@ -89,39 +96,36 @@ class ProcessMediaVerification implements ShouldQueue
                 ]);
                 return;
             }
-
-            // 2. رفع الملف على كلوديناري لحفظ الرابط السحابي للمستقبل
+    
+            // استخراج النسب بدقة
+            preg_match('/([0-9.]+)\s*%/', $aiResult['explanation'] ?? '', $matches);
+            $ai_val = isset($matches[1]) ? (float)$matches[1] : (float)($aiResult['ai_percentage'] ?? 0);
+            $real_val = 100 - $ai_val;
+    
+            // رفع الملف لـ Cloudinary
             $upload = Cloudinary::upload($this->tempPath, [
                 'folder'        => $this->folder,
-                'public_id'     => $this->hash, // **هنا السحر: استخدام الـ Hash كاسم ثابت**
+                'public_id'     => $this->hash,
                 'resource_type' => 'auto',
-                'overwrite'     => true         // **هنا التأكيد: تحديث القديم بدلاً من خلق نسخة جديدة**
+                'overwrite'     => true
             ]);
-
-           // 3. تحديث قاعدة البيانات بالنتيجة والرابط المستقر
+    
+            // تحديث قاعدة البيانات بالنتيجة والنسب
             $verification->update([
                 'input_data'         => $upload->getSecurePath(),
-                'result_status'      => $aiResult['status'] ?? 'unknown',
+                'result_status'      => $aiResult['status'] ?? 'done', // افتراض نجاح إذا لم يحدد الموديل
                 'description_result' => $aiResult['explanation'] ?? 'Analysis complete',
-                'ai_percentage'      => $ai_val,     // <--- أضف هذا السطر
-                'real_percentage'    => $real_val,   // <--- أضف هذا السطر
+                'ai_percentage'      => $ai_val,
+                'real_percentage'    => $real_val,
             ]);
-
-            // 4. استخراج النسب بدقة لإرسالها للـ Event
-            $ai_val = 0;
-            preg_match('/([0-9.]+)\s*%/', $verification->description_result, $matches);
-            if (isset($matches[1])) {
-                $ai_val = (float)$matches[1];
-            } elseif (isset($aiResult['ai_percentage'])) {
-                $ai_val = (float)$aiResult['ai_percentage'];
-            }
-            $real_val = 100 - $ai_val;
-
-            // بث الحدث اللحظي للـ Flutter
+    
+            // بث الحدث للـ Flutter
             event(new \App\Events\MediaVerificationCompleted($verification, $ai_val, $real_val));
             
         } catch (\Exception $e) {
             Log::error("Queue Job Media Verification Error ({$this->type}): " . $e->getMessage());
+            
+            // تحديث الحالة لـ Error في حال فشل أي شيء
             $verification->update([
                 'result_status' => 'Error',
                 'description_result' => 'حدث خطأ غير متوقع أثناء معالجة الملف: ' . $e->getMessage()
