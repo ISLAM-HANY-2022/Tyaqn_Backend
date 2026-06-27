@@ -202,7 +202,8 @@ class AIController extends Controller
                'video',
                '/predict-video',
                'Tyaqn/videos',
-               $file->getClientOriginalName()
+               $file->getClientOriginalName(),
+               $hash
            );
 
            return $this->successResponse($verification->toArray(), 'تم استلام ملف الفيديو بنجاح، وجاري إعادة الفحص.', 202);
@@ -329,10 +330,10 @@ class AIController extends Controller
     public function show($id)
     {
         // 1. جلب الفحص والتأكد أنه يخص المستخدم الحالي لمنع التلاعب
+       // بدلاً من الاستعلام ثم التحقق، يمكنك دمجهم:
         $verification = Verification::where('id', $id)
-                                    ->where('user_id', Auth::id())
-                                    ->first();
-
+        ->where('user_id', Auth::id())
+        ->firstOrFail(); // سيقوم لارافل تلقائياً بإرجاع 404 إذا لم يجد السجل
         // 2. إذا لم يتم العثور على الفحص
         if (!$verification) {
             return response()->json([
