@@ -122,99 +122,106 @@ class AIController extends Controller
     }
 
     /*================ VIDEO =================*/
-   public function verifyVideo(Request $request)
-   {
-       $request->validate([
-           'video_file' => 'required|file|mimes:mp4,mov,avi,mkv,webm,flv,wmv,mpeg,mpg,3gp,m4v|max:' . config('uploads.max_video_size'),
-           'title'      => 'nullable|string'
-       ]);
+  /*================ VIDEO =================*/
+  public function verifyVideo(Request $request)
+  {
+      $request->validate([
+          'video_file' => 'required|file|mimes:mp4,mov,avi,mkv,webm,flv,wmv,mpeg,mpg,3gp,m4v|max:' . config('uploads.max_video_size'),
+          'title'      => 'nullable|string'
+      ]);
 
-       $file = $request->file('video_file');
-       $hash = md5_file($file->getRealPath());
+      $file = $request->file('video_file');
+      $hash = md5_file($file->getRealPath());
 
-       $lock = Cache::lock('verify_video_' . auth()->id() . '_' . $hash, 60);
-       if (!$lock->get()) {
-           return $this->errorResponse('جاري معالجة الفيديو بالفعل، يرجى الانتظار...', 429);
-       }
+      $lock = Cache::lock('verify_video_' . auth()->id() . '_' . $hash, 60);
+      if (!$lock->get()) {
+          return $this->errorResponse('جاري معالجة الفيديو بالفعل، يرجى الانتظار...', 429);
+      }
 
-       try {
-           $existing = Verification::where('file_hash', $hash)->first();
-           
-           if ($existing) {
-               if ($existing->result_status !== 'Error' && $existing->result_status !== 'pending') {
-                   // الكود القديم لإرجاع الكاش السليم...
-                   preg_match('/([0-9.]+)\s*%/', $existing->description_result, $matches);
-                   $ai_percentage = isset($matches[1]) ? (float)$matches[1] : 0;
-                   $real_percentage = 100 - $ai_percentage;
+      try {
+          $existing = Verification::where('file_hash', $hash)->first();
+          
+          if ($existing) {
+              if ($existing->result_status !== 'Error' && $existing->result_status !== 'pending') {
+                  preg_match('/([0-9.]+)\s*%/', $existing->description_result, $matches);
+                  $ai_percentage = isset($matches[1]) ? (float)$matches[1] : 0;
+                  $real_percentage = 100 - $ai_percentage;
 
-                   if ($existing->user_id === auth()->id()) {
-                       $cachedData = $existing->toArray();
-                       $cachedData['ai_percentage'] = $ai_percentage;
-                       $cachedData['real_percentage'] = $real_percentage;
-                       return $this->successResponse($cachedData, 'Video already analyzed (from cache)');
-                   }
+                  if ($existing->user_id === auth()->id()) {
+                      $cachedData = $existing->toArray();
+                      $cachedData['ai_percentage'] = $ai_percentage;
+                      $cachedData['real_percentage'] = $real_percentage;
+                      return $this->successResponse($cachedData, 'Video already analyzed (from cache)');
+                  }
 
-                   $newEntry = $existing->replicate();
-                   $newEntry->user_id = auth()->id();
-                   $newEntry->title = $request->title ?? 'Video check';
-                   $newEntry->created_at = now();
-                   $newEntry->save();
+                  $newEntry = $existing->replicate();
+                  $newEntry->user_id = auth()->id();
+                  $newEntry->title = $request->title ?? 'Video check';
+                  $newEntry->created_at = now();
+                  $newEntry->save();
 
-                   $cachedData = $newEntry->toArray();
-                   $cachedData['ai_percentage'] = $ai_percentage;
-                   $cachedData['real_percentage'] = $real_percentage;
-                   return $this->successResponse($cachedData, 'Video analyzed successfully (from cache)');
-               } elseif ($existing->result_status === 'pending') {
-                   return $this->successResponse($existing->toArray(), 'هذا الفيديو قيد المعالجة حالياً.', 202);
-               }
-               
-               // الحــــــــل ههنا: لو الملف موجود وحالته Error، أعد استخدام السجل القديم ولا تنشئ سجلاً جديداً
-               if ($existing->result_status === 'Error') {
-                   $existing->update([
-                       'title'              => $request->title ?? $existing->title,
-                       'input_data'         => 'pending_upload',
-                       'result_status'      => 'pending',
-                       'description_result' => 'إعادة محاولة فحص الفيديو في الخلفية، ستظهر النتيجة فوراً...'
-                   ]);
-                   $verification = $existing;
-               }
-           } else {
-               // لو الملف أول مرة يترفع أصلاً، ننشئ سجل جديد
-               $verification = Verification::create([
-                   'user_id'            => auth()->id(),
-                   'file_hash'          => $hash,
-                   'title'              => $request->title ?? 'Video check',
-                   'input_data'         => 'pending_upload', 
-                   'type'               => 'video',
-                   'result_status'      => 'pending',
-                   'description_result' => 'جاري نقل وفحص الفيديو في الخلفية، ستظهر النتيجة فوراً عند الانتهاء...'
-               ]);
-           }
+                  $cachedData = $newEntry->toArray();
+                  $cachedData['ai_percentage'] = $ai_percentage;
+                  $cachedData['real_percentage'] = $real_percentage;
+                  return $this->successResponse($cachedData, 'Video analyzed successfully (from cache)');
+              } elseif ($existing->result_status === 'pending') {
+                      // حقن النسب بـ 0 أثناء حالة الانتظار
+                      $pendingData = $existing->toArray();
+                      $pendingData['ai_percentage'] = 0;
+                      $pendingData['real_percentage'] = 0;
+                  return $this->successResponse($pendingData, 'هذا الفيديو قيد المعالجة حالياً.', 202);
+              }
+              
+              if ($existing->result_status === 'Error') {
+                  $existing->update([
+                      'title'              => $request->title ?? $existing->title,
+                      'input_data'         => 'pending_upload',
+                      'result_status'      => 'pending',
+                      'description_result' => 'إعادة محاولة فحص الفيديو في الخلفية، ستظهر النتيجة فوراً...'
+                  ]);
+                  $verification = $existing;
+              }
+          } else {
+              $verification = Verification::create([
+                  'user_id'            => auth()->id(),
+                  'file_hash'          => $hash,
+                  'title'              => $request->title ?? 'Video check',
+                  'input_data'         => 'pending_upload', 
+                  'type'               => 'video',
+                  'result_status'      => 'pending',
+                  'description_result' => 'جاري نقل وفحص الفيديو في الخلفية، ستظهر النتيجة فوراً عند الانتهاء...'
+              ]);
+          }
 
-           $tempName = time() . '_' . rand(100, 999) . '_' . $file->getClientOriginalName();
-           $file->storeAs('temp_media', $tempName, 'local'); 
-           $tempPath = storage_path('app/temp_media/' . $tempName);
+          $tempName = time() . '_' . rand(100, 999) . '_' . $file->getClientOriginalName();
+          $file->storeAs('temp_media', $tempName, 'local'); 
+          $tempPath = storage_path('app/temp_media/' . $tempName);
 
-           \App\Jobs\ProcessMediaVerification::dispatch(
-               $verification->id,
-               $tempPath,
-               'video_file',
-               'video',
-               '/predict-video',
-               'Tyaqn/videos',
-               $file->getClientOriginalName(),
-               $hash
-           );
+          \App\Jobs\ProcessMediaVerification::dispatch(
+              $verification->id,
+              $tempPath,
+              'video_file',
+              'video',
+              '/predict-video',
+              'Tyaqn/videos',
+              $file->getClientOriginalName(),
+              $hash
+          );
 
-           return $this->successResponse($verification->toArray(), 'تم استلام ملف الفيديو بنجاح، وجاري إعادة الفحص.', 202);
+          // التعديل هنا: حقن النسب المبدئية للرد
+          $responseData = $verification->toArray();
+          $responseData['ai_percentage'] = 0;
+          $responseData['real_percentage'] = 0;
 
-       } catch (\Exception $e) {
-           Log::error("Video File Verification Error: " . $e->getMessage());
-           return $this->errorResponse('حدث خطأ أثناء فحص الملف', 500);
-       } finally {
-           $lock->release();
-       }
-   }
+          return $this->successResponse($responseData, 'تم استلام ملف الفيديو بنجاح، وجاري الفحص.', 202);
+
+      } catch (\Exception $e) {
+          Log::error("Video File Verification Error: " . $e->getMessage());
+          return $this->errorResponse('حدث خطأ أثناء فحص الملف', 500);
+      } finally {
+          $lock->release();
+      }
+  }
     /*================ AUDIO =================*/
     public function verifyAudio(Request $request)
     {
@@ -227,97 +234,104 @@ class AIController extends Controller
     }
 
     /*================ PROCESS MEDIA =================*/
-    private function processMedia($request, $fileKey, $type, $endpoint, $folder)
-    {
-        $file = $request->file($fileKey);
-        $hash = md5_file($file->getRealPath());
+  /*================ PROCESS MEDIA =================*/
+  private function processMedia($request, $fileKey, $type, $endpoint, $folder)
+  {
+      $file = $request->file($fileKey);
+      $hash = md5_file($file->getRealPath());
 
-        $lock = Cache::lock('verify_media_' . auth()->id() . '_' . $hash, 60);
-        if (!$lock->get()) {
-            return $this->errorResponse('جاري رفع ومعالجة الملف، يرجى الانتظار...', 429);
-        }
+      $lock = Cache::lock('verify_media_' . auth()->id() . '_' . $hash, 60);
+      if (!$lock->get()) {
+          return $this->errorResponse('جاري رفع ومعالجة الملف، يرجى الانتظار...', 429);
+      }
 
-        try {
-            $existing = Verification::where('file_hash', $hash)->first();
+      try {
+          $existing = Verification::where('file_hash', $hash)->first();
 
-            if ($existing) {
-                if ($existing->result_status !== 'Error' && $existing->result_status !== 'pending') {
-                    // ارجاع الكاش السليم القديم...
-                    $fileHeaders = @get_headers($existing->input_data);
-                    if ($fileHeaders && strpos($fileHeaders[0], '200')) {
-                        preg_match('/([0-9.]+)\s*%/', $existing->description_result, $matches);
-                        $ai_percentage = isset($matches[1]) ? (float)$matches[1] : 0;
-                        $real_percentage = 100 - $ai_percentage;
+          if ($existing) {
+              if ($existing->result_status !== 'Error' && $existing->result_status !== 'pending') {
+                  $fileHeaders = @get_headers($existing->input_data);
+                  if ($fileHeaders && strpos($fileHeaders[0], '200')) {
+                      preg_match('/([0-9.]+)\s*%/', $existing->description_result, $matches);
+                      $ai_percentage = isset($matches[1]) ? (float)$matches[1] : 0;
+                      $real_percentage = 100 - $ai_percentage;
 
-                        if ($existing->user_id === auth()->id()) {
-                            $cachedData = $existing->toArray();
-                            $cachedData['ai_percentage'] = $ai_percentage;
-                            $cachedData['real_percentage'] = $real_percentage;
-                            return $this->successResponse($cachedData, 'File already analyzed (from cache)');
-                        }
-                
-                        $newEntry = $existing->replicate();
-                        $newEntry->user_id = auth()->id();
-                        $newEntry->title = $request->title ?? 'New ' . $type . ' check';
-                        $newEntry->created_at = now();
-                        $newEntry->save();
-                
-                        $cachedData = $newEntry->toArray();
-                        $cachedData['ai_percentage'] = $ai_percentage;
-                        $cachedData['real_percentage'] = $real_percentage;
-                        return $this->successResponse($cachedData, 'File analyzed successfully (from cache)');
-                    }
-                } elseif ($existing->result_status === 'pending') {
-                    return $this->successResponse($existing->toArray(), 'هذا الملف قيد المعالجة حالياً، يرجى الانتظار.', 202);
-                }
+                      if ($existing->user_id === auth()->id()) {
+                          $cachedData = $existing->toArray();
+                          $cachedData['ai_percentage'] = $ai_percentage;
+                          $cachedData['real_percentage'] = $real_percentage;
+                          return $this->successResponse($cachedData, 'File already analyzed (from cache)');
+                      }
+              
+                      $newEntry = $existing->replicate();
+                      $newEntry->user_id = auth()->id();
+                      $newEntry->title = $request->title ?? 'New ' . $type . ' check';
+                      $newEntry->created_at = now();
+                      $newEntry->save();
+              
+                      $cachedData = $newEntry->toArray();
+                      $cachedData['ai_percentage'] = $ai_percentage;
+                      $cachedData['real_percentage'] = $real_percentage;
+                      return $this->successResponse($cachedData, 'File analyzed successfully (from cache)');
+                  }
+              } elseif ($existing->result_status === 'pending') {
+                     // حقن النسب بـ 0 أثناء حالة الانتظار
+                     $pendingData = $existing->toArray();
+                     $pendingData['ai_percentage'] = 0;
+                     $pendingData['real_percentage'] = 0;
+                  return $this->successResponse($pendingData, 'هذا الملف قيد المعالجة حالياً، يرجى الانتظار.', 202);
+              }
 
-                // الحــــــــل ههنا أيضاً: تحديث السجل الفاشل القديم بدلاً من تكراره
-                if ($existing->result_status === 'Error') {
-                    $existing->update([
-                        'title'              => $request->title ?? $existing->title,
-                        'input_data'         => 'pending_upload',
-                        'result_status'      => 'pending',
-                        'description_result' => 'جاري إعادة فحص الملف ومعالجة البيانات في الخلفية...'
-                    ]);
-                    $verification = $existing;
-                }
-            } else {
-                // إنشاء سجل جديد تماماً لأول مرة
-                $verification = Verification::create([
-                    'user_id'            => auth()->id(),
-                    'file_hash'          => $hash,
-                    'title'              => $request->title ?? 'New ' . $type . ' check',
-                    'input_data'         => 'pending_upload', 
-                    'type'               => $type,
-                    'result_status'      => 'pending',
-                    'description_result' => 'جاري فحص الملف ومعالجة البيانات في الخلفية...'
-                ]);
-            }
+              if ($existing->result_status === 'Error') {
+                  $existing->update([
+                      'title'              => $request->title ?? $existing->title,
+                      'input_data'         => 'pending_upload',
+                      'result_status'      => 'pending',
+                      'description_result' => 'جاري إعادة فحص الملف ومعالجة البيانات في الخلفية...'
+                  ]);
+                  $verification = $existing;
+              }
+          } else {
+              $verification = Verification::create([
+                  'user_id'            => auth()->id(),
+                  'file_hash'          => $hash,
+                  'title'              => $request->title ?? 'New ' . $type . ' check',
+                  'input_data'         => 'pending_upload', 
+                  'type'               => $type,
+                  'result_status'      => 'pending',
+                  'description_result' => 'جاري فحص الملف ومعالجة البيانات في الخلفية...'
+              ]);
+          }
 
-            $tempName = time() . '_' . rand(100, 999) . '_' . $file->getClientOriginalName();
-            $file->storeAs('temp_media', $tempName, 'local'); 
-            $tempPath = storage_path('app/temp_media/' . $tempName);
+          $tempName = time() . '_' . rand(100, 999) . '_' . $file->getClientOriginalName();
+          $file->storeAs('temp_media', $tempName, 'local'); 
+          $tempPath = storage_path('app/temp_media/' . $tempName);
 
-            \App\Jobs\ProcessMediaVerification::dispatch(
-                $verification->id,
-                $tempPath,
-                $fileKey,
-                $type,
-                $endpoint,
-                $folder,
-                $file->getClientOriginalName(),
-                $hash
-            );
+          \App\Jobs\ProcessMediaVerification::dispatch(
+              $verification->id,
+              $tempPath,
+              $fileKey,
+              $type,
+              $endpoint,
+              $folder,
+              $file->getClientOriginalName(),
+              $hash
+          );
 
-            return $this->successResponse($verification->toArray(), 'تم استلام الملف بنجاح وبدء إعادة المعالجة.', 202);
+          // التعديل هنا: حقن النسب المبدئية للرد
+          $responseData = $verification->toArray();
+          $responseData['ai_percentage'] = 0;
+          $responseData['real_percentage'] = 0;
 
-        } catch (\Exception $e) {
-            Log::error("Media Verification Error ($type): " . $e->getMessage());
-            return $this->errorResponse('حدث خطأ أثناء فحص الملف', 500);
-        } finally {
-            $lock->release(); 
-        }
-    }
+          return $this->successResponse($responseData, 'تم استلام الملف بنجاح وبدء إعادة المعالجة.', 202);
+
+      } catch (\Exception $e) {
+          Log::error("Media Verification Error ($type): " . $e->getMessage());
+          return $this->errorResponse('حدث خطأ أثناء فحص الملف', 500);
+      } finally {
+          $lock->release(); 
+      }
+  }
     /*================ HISTORY =================*/
     public function history()
     {
@@ -354,6 +368,7 @@ class AIController extends Controller
                 'input_data' => $verification->input_data, // رابط الـ Cloudinary
                 'type' => $verification->type,             // video, image, etc.
                 'result_status' => $verification->result_status, // Real or Fake
+                'description_result' => $verification->description_result,
                 'ai_percentage' => (float) $verification->ai_percentage,
                 'real_percentage' => (float) $verification->real_percentage,
                 'created_at' => $verification->created_at,
