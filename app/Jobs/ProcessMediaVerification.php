@@ -98,11 +98,13 @@ class ProcessMediaVerification implements ShouldQueue
                 'overwrite'     => true         // **هنا التأكيد: تحديث القديم بدلاً من خلق نسخة جديدة**
             ]);
 
-            // 3. تحديث قاعدة البيانات بالنتيجة والرابط المستقر
+           // 3. تحديث قاعدة البيانات بالنتيجة والرابط المستقر
             $verification->update([
                 'input_data'         => $upload->getSecurePath(),
                 'result_status'      => $aiResult['status'] ?? 'unknown',
-                'description_result' => $aiResult['explanation'] ?? 'Analysis complete'
+                'description_result' => $aiResult['explanation'] ?? 'Analysis complete',
+                'ai_percentage'      => $ai_val,     // <--- أضف هذا السطر
+                'real_percentage'    => $real_val,   // <--- أضف هذا السطر
             ]);
 
             // 4. استخراج النسب بدقة لإرسالها للـ Event

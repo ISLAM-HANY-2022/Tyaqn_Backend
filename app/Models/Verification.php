@@ -9,7 +9,7 @@ class Verification extends Model
 {
     use HasFactory;
    
-    protected $fillable = ['user_id','file_hash', 'title', 'input_data', 'type', 'result_status', 'description_result']; 
+    protected $fillable = ['user_id','file_hash', 'title', 'input_data', 'type', 'result_status', 'description_result','ai_percentage', 'real_percentage',]; 
 
     public function user() { return $this->belongsTo(User::class); }
     public function article() { return $this->hasOne(Article::class);}
