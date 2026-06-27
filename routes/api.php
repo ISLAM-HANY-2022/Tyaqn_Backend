@@ -34,7 +34,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/verify/audio', [AIController::class, 'verifyAudio']);//✅
     Route::post('/verify/video', [AIController::class, 'verifyVideo']);//✅
     Route::get('/history', [AIController::class, 'history']);//✅
-
+    Route::get('/verify/{id}', [AIController::class, 'show']);
     /*--- Profile ---*/    
     Route::get('/user/profile', [UserController::class, 'profile']);//✅
     Route::post('/user/profile/update', [UserController::class, 'updateProfile']);//✅ 

@@ -325,4 +325,38 @@ class AIController extends Controller
 
         return $this->successResponse($history,'History retrieved');
     }
+    public function show($id)
+    {
+        // 1. جلب الفحص والتأكد أنه يخص المستخدم الحالي لمنع التلاعب
+        $verification = Verification::where('id', $id)
+                                    ->where('user_id', Auth::id())
+                                    ->first();
+
+        // 2. إذا لم يتم العثور على الفحص
+        if (!$verification) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Verification record not found or unauthorized.'
+            ], 404);
+        }
+
+        // 3. إرجاع البيانات بنفس الـ Structure اللي بتستعمله في الـ Postman
+        return response()->json([
+            'status' => true,
+            'message' => 'Verification details retrieved successfully.',
+            'data' => [
+                'id' => $verification->id,
+                'file_hash' => $verification->file_hash,
+                'user_id' => $verification->user_id,
+                'title' => $verification->title,
+                'input_data' => $verification->input_data, // رابط الـ Cloudinary
+                'type' => $verification->type,             // video, image, etc.
+                'result_status' => $verification->result_status, // Real or Fake
+                'ai_percentage' => (float) $verification->ai_percentage,
+                'real_percentage' => (float) $verification->real_percentage,
+                'created_at' => $verification->created_at,
+                'updated_at' => $verification->updated_at,
+            ]
+        ], 200);
+    }
 }
