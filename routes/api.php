@@ -10,6 +10,7 @@ use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\BookmarksController;
 use App\Http\Controllers\ReportController;
+use Illuminate\Support\Facades\Auth;
 
 /*=====================  AUTH (Public)  ======================*/
 Route::post('/register', [AuthController::class, 'register']);//✅
