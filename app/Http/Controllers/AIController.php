@@ -164,13 +164,17 @@ class AIController extends Controller
                   $cachedData['ai_percentage'] = $ai_percentage;
                   $cachedData['real_percentage'] = $real_percentage;
                   return $this->successResponse($cachedData, 'Video analyzed successfully (from cache)');
-              } elseif ($existing->result_status === 'pending') {
-                      // حقن النسب بـ 0 أثناء حالة الانتظار
-                      $pendingData = $existing->toArray();
-                      $pendingData['ai_percentage'] = 0;
-                      $pendingData['real_percentage'] = 0;
-                  return $this->successResponse($pendingData, 'هذا الفيديو قيد المعالجة حالياً.', 202);
-              }
+                } elseif ($existing->result_status === 'pending') {
+                    // 1. التحقق: هل مر أكثر من 10 دقائق على السجل؟
+                    if ($existing->updated_at->diffInMinutes(now()) > 10) {
+                        // نعتبره "سجلاً تالفاً" (stale)، ونقوم بتغيير حالته لـ Error ليسمح الكود بإعادة إرسال الـ Job
+                        $existing->update(['result_status' => 'Error']);
+                        // سنسمح للكود بالاستمرار ليقوم بإنشاء Job جديد في الـ else التالية
+                    } else {
+                        // لا يزال في فترة الانتظار (أقل من 10 دقائق)، نمنع التكرار
+                        return $this->errorResponse('هذا الملف قيد المعالجة حالياً، يرجى الانتظار...', 202);
+                    }
+                }
               
               if ($existing->result_status === 'Error') {
                   $existing->update([
@@ -274,13 +278,20 @@ class AIController extends Controller
                       $cachedData['real_percentage'] = $real_percentage;
                       return $this->successResponse($cachedData, 'File analyzed successfully (from cache)');
                   }
-              } elseif ($existing->result_status === 'pending') {
-                     // حقن النسب بـ 0 أثناء حالة الانتظار
-                     $pendingData = $existing->toArray();
-                     $pendingData['ai_percentage'] = 0;
-                     $pendingData['real_percentage'] = 0;
-                  return $this->successResponse($pendingData, 'هذا الملف قيد المعالجة حالياً، يرجى الانتظار.', 202);
-              }
+                } elseif ($existing->result_status === 'pending') {
+                    // 1. التحقق: هل مر أكثر من 10 دقائق على السجل؟
+                    if ($existing->updated_at->diffInMinutes(now()) > 10) {
+                        // نعتبره "سجلاً تالفاً" (stale)، ونقوم بتغيير حالته لـ Error ليسمح الكود بإعادة إرسال الـ Job
+                        $existing->update(['result_status' => 'Error']);
+                        // سيقوم الكود بالاستمرار في الـ Scope الحالي وتحديث السجل وبدء Job جديد
+                    } else {
+                        // لا يزال في فترة الانتظار (أقل من 10 دقائق)، نجهز البيانات بـ 0 ونمنع التكرار
+                        $pendingData = $existing->toArray();
+                        $pendingData['ai_percentage'] = 0;
+                        $pendingData['real_percentage'] = 0;
+                        return $this->successResponse($pendingData, 'هذا الملف قيد المعالجة حالياً، يرجى الانتظار...', 202);
+                    }
+                }
 
               if ($existing->result_status === 'Error') {
                   $existing->update([
